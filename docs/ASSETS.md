@@ -53,7 +53,8 @@ the Pi. It is tab-separated, so it also opens in a spreadsheet:
 | `missing_file` | The file to add, relative to `images/`: `air/<ICAO>.png`, `aircraft/<ICAO>/<TYPE>.png` or `aircraft/_generic/<TYPE>.png` |
 | `showing_instead` | What was shown: `badge`, `drawn`, a stand-in file, or `nothing` |
 
-Each file is listed once however often it is seen. After you add files and
-rerun the installer, rows whose file now exists are dropped the next time the
-display logs something, so the log stays a to-do list. Demo mode logs nothing.
+Each file is listed once however often it is seen. Once you add files and
+rerun the installer, the admin page's copy leaves them out straight away, and
+the display drops their rows from the file when it restarts (the installer
+restarts it), so the log stays a to-do list. Demo mode logs nothing.
 

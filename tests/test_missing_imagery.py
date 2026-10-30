@@ -1,4 +1,5 @@
 import re
+from dataclasses import replace
 
 import pytest
 from PIL import Image
@@ -93,7 +94,7 @@ def test_unknown_airline_callsigns_are_logged(log, tmp_path, monkeypatch, plane)
     assert (row["airline"], row["airline_name"], row["missing_file"]) == ("ZZQ", "", "air/ZZQ.png")
 
 
-def test_admin_serves_the_log(config, tmp_path):
+def test_admin_serves_the_log_without_installed_artwork(config, tmp_path, monkeypatch):
     client = create_app(config=config, state_path=tmp_path).test_client()
     assert client.get("/missing-imagery.log").status_code == 401
     page = client.get("/login")
@@ -101,6 +102,39 @@ def test_admin_serves_the_log(config, tmp_path):
     client.post("/login", data={"username": "admin", "password": "test-password-123", "csrf": token})
     assert b'href="/missing-imagery.log"' in client.get("/").data
     assert b"Nothing missing yet" in client.get("/missing-imagery.log").data
-    (tmp_path / missing_imagery.FILENAME).write_text("first_seen\tkind\n", encoding="utf-8")
+    images = tmp_path / "images"
+    (images / "air").mkdir(parents=True)
+    Image.new("RGBA", (4, 4)).save(images / "air" / "DAL.png")
+    monkeypatch.setenv("ADSB_RADAR_ASSETS", str(images))
+    missing_imagery.configure(tmp_path / missing_imagery.FILENAME, images)
+    missing_imagery.record_logo("UAL", images / "air")
+    with (tmp_path / missing_imagery.FILENAME).open("a", encoding="utf-8") as log:  # installed after logging
+        log.write("\t".join(["t", "airline_logo", "DAL", "", "", "", "", "air/DAL.png", "badge"]) + "\n")
     reply = client.get("/missing-imagery.log")
-    assert reply.status_code == 200 and reply.data.startswith(b"first_seen") and reply.mimetype == "text/plain"
+    assert reply.status_code == 200 and reply.mimetype == "text/plain"
+    assert [line.split("\t")[2] for line in reply.text.splitlines()[1:]] == ["UAL"]
+    missing_imagery.configure(None)
+
+
+def test_artwork_added_while_running_or_before_a_restart_leaves_the_log(log, tmp_path, monkeypatch):
+    air = tmp_path / "images" / "air"
+    missing_imagery.record_logo("UAL", air)
+    missing_imagery.record_logo("DAL", air)
+    air.mkdir(parents=True)
+    Image.new("RGBA", (4, 4)).save(air / "DAL.png")
+    missing_imagery.configure(log, tmp_path / "images")  # a restart with nothing new missing
+    assert [r["airline"] for r in rows(log)] == ["UAL"]
+    Image.new("RGBA", (4, 4)).save(air / "UAL.png")
+    monkeypatch.setattr(missing_imagery, "REFRESH_SECONDS", 0.0)
+    missing_imagery.record_logo("AAL", air)  # while running, once the log is stale
+    assert [r["airline"] for r in rows(log)] == ["AAL"]
+
+
+def test_exact_generic_illustration_is_not_logged(log, tmp_path, monkeypatch, plane):
+    art = tmp_path / "images" / "aircraft"
+    (art / aircraft_art.GENERIC).mkdir(parents=True)
+    Image.new("RGBA", (40, 12), (200, 30, 30, 255)).save(art / aircraft_art.GENERIC / "C172.png")
+    monkeypatch.setattr(aircraft_art, "ASSET_DIR", str(art))
+    private = flight_layout.OverheadFlight(replace(plane, callsign="N123AB", aircraft_type="C172"), None, None)
+    flight_layout._draw_aircraft(Image.new("RGB", (400, 200)), (0, 0, 400, 200), private)
+    assert not log.exists()

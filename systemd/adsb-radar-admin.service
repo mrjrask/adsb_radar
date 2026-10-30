@@ -10,6 +10,7 @@ User=adsb-radar
 Group=adsb-radar
 WorkingDirectory=/opt/adsb-radar
 Environment=PYTHONDONTWRITEBYTECODE=1
+Environment=ADSB_RADAR_ASSETS=/var/lib/adsb-radar/images
 ExecStart=/usr/bin/python3 -m adsb_radar.admin
 Restart=always
 RestartSec=5
