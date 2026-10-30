@@ -832,7 +832,7 @@ def _log_missing_aircraft(flight: OverheadFlight, shown: bool) -> None:
     airline = flight.airline
     icao = airline.icao if airline is not None else None
     used = aircraft_art.asset_path(designator, icao, aircraft_art.ASSET_DIR)
-    exact = os.path.join(aircraft_art.ASSET_DIR, (icao or aircraft_art.GENERIC).upper(),
+    exact = os.path.join(aircraft_art.ASSET_DIR, icao.upper() if icao else aircraft_art.GENERIC,
                          f"{(designator or '').strip().upper()}.png")
     if used is not None and os.path.abspath(used) == os.path.abspath(exact):
         return

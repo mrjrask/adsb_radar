@@ -217,6 +217,8 @@ def create_app(config_path=CONFIG_PATH, state_path=STATE_PATH, config=None):
         if not path.is_file():
             return Response("Nothing missing yet: every flight shown had its logo and illustration.\n",
                             content_type="text/plain; charset=utf-8")
-        return send_file(path, mimetype="text/plain", max_age=0, download_name=missing_imagery.FILENAME)
+        # Leave out artwork installed since the display last read the log.
+        rows, _dropped = missing_imagery.pending(path, missing_imagery.asset_root())
+        return Response(missing_imagery.render(rows), content_type="text/plain; charset=utf-8")
 
     return app
