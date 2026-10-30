@@ -9,7 +9,7 @@ import logging
 import math
 import os
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from functools import lru_cache
 from pathlib import Path
 from typing import Any, Optional
@@ -78,6 +78,43 @@ class OverheadFlight:
     nearby_count: int = 1
     # Every aircraft on the sky map (the overhead one included), nearest first.
     traffic: tuple[LiveAircraft, ...] = field(default_factory=tuple)
+    # The flight sold under other airlines' numbers: (airline, callsign), e.g. Delta's DAL5432.
+    codeshares: tuple[tuple[Optional[airline_directory.Airline], str], ...] = ()
+    # Which of identities() the header shows (0: the operator).
+    brand: int = 0
+
+
+def identities(flight: OverheadFlight) -> tuple[tuple[Optional[airline_directory.Airline], str], ...]:
+    """The airlines and flight numbers the header cycles through, operator first."""
+
+    return ((flight.airline, _callsign(flight.aircraft)),) + flight.codeshares
+
+
+# A codeshare flight's logo and flight number hold this long, then fade out
+# and the next one fades in, in place, over CODESHARE_FADE.
+CODESHARE_HOLD = 4.0
+CODESHARE_FADE = 1.2
+
+
+def codeshare_phase(now: float) -> tuple[int, float]:
+    """(step, fade): every codeshare flight shows identity ``step % count``; fade is 0 while
+    holding and runs to 1 as it fades out (to 0.5) and the next one fades in."""
+
+    period = CODESHARE_HOLD + CODESHARE_FADE
+    step = math.floor(now / period)
+    return step, max(0.0, min(1.0, (now - step * period - CODESHARE_HOLD) / CODESHARE_FADE))
+
+
+def crossfade(shown: Image.Image, blank: Image.Image, following: Image.Image, fade: float) -> Image.Image:
+    """*shown* fading out to *blank*, then *following* fading in, for fade 0..1."""
+
+    if fade <= 0:
+        return shown
+    if fade >= 1:
+        return following
+    half = fade * 2 if fade < 0.5 else fade * 2 - 1
+    eased = half * half * (3 - 2 * half)
+    return Image.blend(shown, blank, eased) if fade < 0.5 else Image.blend(blank, following, eased)
 
 
 # ── Drawing helpers ─────────────────────────────────────────────────────────
@@ -316,13 +353,13 @@ def logo_tile(airline: Optional[airline_directory.Airline], size: int, callsign:
     return _logo_tile(airline, int(size), mtime)
 
 
-def _draw_logo_tile(image: Image.Image, x: int, y: int, size: int, flight: OverheadFlight) -> None:
+def _draw_logo_tile(image: Image.Image, x: int, y: int, size: int,
+                    airline: Optional[airline_directory.Airline], callsign: Optional[str] = None) -> None:
     """White rounded tile with the airline's logo, or a brand-colour badge."""
 
-    callsign = flight.aircraft.callsign
-    if flight.airline is None:  # a callsign naming an airline the directory lacks
+    if airline is None:  # a callsign naming an airline the directory lacks
         missing_imagery.record_logo(airline_directory.airline_code(callsign), ASSET_DIR / "air", callsign=callsign)
-    tile = logo_tile(flight.airline, size, callsign)
+    tile = logo_tile(airline, size, callsign)
     image.paste(tile, (x, y), tile)
 
 
@@ -351,12 +388,12 @@ def route_progress(flight: OverheadFlight, unit: str) -> Optional[tuple[float, f
     return flown / total, flown, to_go
 
 
-def _subtitle(flight: OverheadFlight) -> str:
+def _subtitle(flight: OverheadFlight, airline, callsign: str) -> str:
     """'UAE235 · A380-800' (flight number and aircraft type)."""
 
     parts = []
-    if flight.airline is not None:
-        parts.append(_callsign(flight.aircraft))
+    if airline is not None:
+        parts.append(callsign)
     type_name = airline_directory.aircraft_type_name(flight.aircraft.aircraft_type)
     if type_name:
         parts.append(type_name)
@@ -367,14 +404,18 @@ def _draw_header(image: Image.Image, box, flight: OverheadFlight) -> None:
     left, top, right, bottom = box
     draw = ImageDraw.Draw(image)
     tile = round(bottom - top)
-    _draw_logo_tile(image, round(left), round(top), tile, flight)
+    choices = identities(flight)
+    airline, callsign = choices[flight.brand % len(choices)]
+    # The hex ID stands in for a missing callsign; only a real callsign can name an airline.
+    _draw_logo_tile(image, round(left), round(top), tile, airline,
+                    callsign if airline is not None else flight.aircraft.callsign)
     x = left + tile + max(4, round(tile * 0.2))
     width = round(right - x)
-    name = flight.airline.name if flight.airline is not None else _callsign(flight.aircraft)
+    name = airline.name if airline is not None else callsign
     font, fitted = _fit(draw, name, tile * 0.3, width, bold=True)
-    if fitted != name and flight.airline is not None:
-        name = flight.airline.short_name
-    subtitle = _subtitle(flight)
+    if fitted != name and airline is not None:
+        name = airline.short_name
+    subtitle = _subtitle(flight, airline, callsign)
     name_cap = tile * 0.3
     sub_cap = tile * 0.19
     gap = tile * 0.16
@@ -714,6 +755,27 @@ def _wash(image: Image.Image, accent, depth: float) -> None:
         t = (1 - row / rows) ** 1.6
         gradient.putpixel((0, row), _mix(BACKGROUND, tint, t))
     image.paste(gradient.resize((width, rows)), (0, 0))
+
+
+def header_box(width: int, height: int) -> tuple[int, int, int, int]:
+    """The flight board's logo, airline and flight number, as whole pixels (left, top, right, bottom)."""
+
+    left, top, right, bottom = _layout(width, height)["header"]
+    return math.floor(left), math.floor(top), math.ceil(right), math.ceil(bottom)
+
+
+def compose_header(flight: OverheadFlight, width: int, height: int, brand: Optional[int]) -> Image.Image:
+    """The board's header area showing identity *brand*, or just its background for None.
+
+    Pixel-identical to that area of :func:`compose_overhead_image`, so it can be pasted over it.
+    """
+
+    image = Image.new("RGB", (width, height), BACKGROUND)
+    _wash(image, accent_color(flight.airline), 0.45)
+    box = _layout(width, height)["header"]
+    if brand is not None:
+        _draw_header(image, box, replace(flight, brand=brand))
+    return image.crop(header_box(width, height))
 
 
 def _compose_flight(image: Image.Image, flight: OverheadFlight, home, unit: str, radius: float, radar_range=None,

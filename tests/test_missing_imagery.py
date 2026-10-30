@@ -1,5 +1,4 @@
 import re
-from dataclasses import replace
 
 import pytest
 from PIL import Image
@@ -69,7 +68,7 @@ def test_flight_board_logs_its_badge_and_drawn_aircraft(log, tmp_path, monkeypat
     monkeypatch.setattr(flight_layout, "ASSET_DIR", tmp_path / "images")
     monkeypatch.setattr(aircraft_art, "ASSET_DIR", str(tmp_path / "images" / "aircraft"))
     image = Image.new("RGB", (400, 400))
-    flight_layout._draw_logo_tile(image, 0, 0, 200, flight(plane))
+    flight_layout._draw_logo_tile(image, 0, 0, 200, flight(plane).airline, plane.callsign)
     flight_layout._draw_aircraft(image, (0, 200, 400, 400), flight(plane))
     found = rows(log)
     assert [(r["kind"], r["airline"], r["type"], r["missing_file"]) for r in found] == [
@@ -89,8 +88,7 @@ def test_flight_board_names_the_stand_in_illustration(log, tmp_path, monkeypatch
 
 def test_unknown_airline_callsigns_are_logged(log, tmp_path, monkeypatch, plane):
     monkeypatch.setattr(flight_layout, "ASSET_DIR", tmp_path / "images")
-    unknown = flight_layout.OverheadFlight(replace(plane, callsign="ZZQ12"), None, None)
-    flight_layout._draw_logo_tile(Image.new("RGB", (100, 100)), 0, 0, 100, unknown)
+    flight_layout._draw_logo_tile(Image.new("RGB", (100, 100)), 0, 0, 100, None, "ZZQ12")
     (row,) = rows(log)
     assert (row["airline"], row["airline_name"], row["missing_file"]) == ("ZZQ", "", "air/ZZQ.png")
 
