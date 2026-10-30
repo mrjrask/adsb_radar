@@ -134,3 +134,20 @@ def test_radar_list_fades_codeshare_rows_in_place(config, plane, tmp_path, monke
     assert frames[0].tobytes() == frames[1].tobytes()
     assert frames[0].tobytes() != frames[2].tobytes()
     assert frames[3].tobytes() not in (frames[0].tobytes(), frames[2].tobytes())
+
+
+def test_a_failed_codeshare_lookup_keeps_the_operating_route(plane, tmp_path, monkeypatch):
+    import requests
+
+    envoy = replace(plane, callsign="ENY3456", latitude=41.95, longitude=-88.3, altitude_ft=5000)
+    own = _route("ENY3456", LNK, ORD, "Envoy Air", "MQ")
+    metadata = Metadata(tmp_path)
+
+    def fake_fetch(callsign):
+        if callsign == "AAL3456":
+            raise requests.ConnectionError("down")
+        return True, own
+
+    monkeypatch.setattr(metadata, "_fetch_route", fake_fetch)
+    metadata.update_route(envoy)
+    assert metadata.route(envoy) == own

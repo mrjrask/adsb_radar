@@ -99,8 +99,12 @@ class Metadata:
 
         own = leg(route)
         for partner in codeshares.codeshare_callsigns(plane.callsign):
-            answered, other = self._fetch_route(partner)
+            try:
+                answered, other = self._fetch_route(partner)
+            except (requests.RequestException, ValueError):
+                answered = False
             if not answered:
+                # Keep the operator's own answer rather than lose it to a failed extra lookup.
                 break
             shared = leg(other)
             if shared is None or (own is not None and ends(own) != ends(shared)):
