@@ -112,27 +112,6 @@ def parse_adsbdb(payload: Any, callsign: str = "") -> Optional[FlightRoute]:
     )
 
 
-def parse_routeset_item(item: Any) -> Optional[FlightRoute]:
-    """A :class:`FlightRoute` from one adsb.lol ``routeset`` entry, or None when unknown."""
-
-    if not isinstance(item, dict) or str(item.get("airport_codes") or "unknown") == "unknown":
-        return None
-    airports = item.get("_airports") if isinstance(item.get("_airports"), list) else []
-    stops = tuple(a for a in map(_airport_from_dict, airports) if a is not None)
-    if not stops:
-        return None
-    airline = str(item.get("airline_code") or "").strip().upper()
-    return FlightRoute(
-        callsign=str(item.get("callsign") or "").strip().upper(),
-        airline_name="",
-        airline_icao="" if airline == "UNKNOWN" else airline,
-        airline_iata="",
-        origin=stops[0],
-        destination=stops[-1] if len(stops) > 1 else None,
-        stops=stops if len(stops) > 2 else (),
-    )
-
-
 _AIRPORT_WORDS = (
     (re.compile(r"\bInternational\b", re.I), "Intl"),
     (re.compile(r"\bIntercontinental\b", re.I), "Intcntl"),

@@ -42,8 +42,8 @@ does not stop another endpoint's data from being displayed.
 Run the commands in the README. Dependencies come from apt, including
 `python3-pygame`, Pillow, Flask, Requests, Gunicorn, SDL2/DRM/Mesa, KMS support
 libraries, and the **Bebas Neue, JetBrains Mono, and DejaVu** fonts. There is
-no pip installation into the OS-managed Python environment. The installer
-checks that the installed SDL2 actually exposes the `kmsdrm` backend.
+no pip installation into the OS-managed Python environment. SDL2's `kmsdrm`
+backend is only needed for the optional KMS output (see *Output* below).
 
 `sudo ./install.sh --no-start` stages/enables the services without taking
 over tty1 during installation. Before starting them, run:
@@ -96,7 +96,7 @@ Choose **HDMI output → Output resolution** on the admin page:
 The installer also asks for the initial profile. Text, split-flap tiles,
 aircraft artwork, rings, and planes are drawn at that size. The radar list
 shows 10, 7, or 5 nearby aircraft on 4K, 1080p, or projector layouts. Projector
-radar labels use fonts no smaller than 16px. No 64×64 frames are used or enlarged.
+radar labels use fonts no smaller than 16px.
 
 The physical device must advertise the selected mode through HDMI/EDID.
 A projector's native imaging resolution and its accepted HDMI input modes
@@ -127,6 +127,26 @@ dashboard. `FPS` is the app's animation cap (default 15), independent of HDMI
 refresh. Lower it to 8–10 if full 4K rendering is too costly on your Pi.
 See Raspberry Pi's [display configuration documentation](https://www.raspberrypi.com/documentation/computers/configuration.html)
 and [KMS HDMI troubleshooting guide](https://pip-assets.raspberrypi.com/categories/1259-audio-camera-and-display/documents/RP-004341-WP/Troubleshooting-KMS-HDMI-output).
+
+## Output: framebuffer or SDL KMS/DRM
+
+Frames are drawn in software with Pillow, then copied to the screen. By
+default (`auto`) the display service writes them straight to the console
+framebuffer, `/dev/fb0`, which works anywhere the text console is visible
+and needs no SDL, EGL, or GPU driver. With SDL2 2.32 and the Mesa 26 packages
+on Raspberry Pi OS Trixie, SDL's KMS/DRM backend can take over the screen yet
+show only black (sometimes with a mouse pointer), so it is no longer the default.
+
+The framebuffer runs at the console's HDMI mode. `auto` uses whatever that
+is. To use a different fixed mode, choose it on the kernel command line: add
+`video=HDMI-A-1:1920x1080@60` (for example) to the single line in
+`/boot/firmware/cmdline.txt` and reboot. Selecting a profile that differs from
+the console mode shows that instruction as a resolution error in the admin.
+
+To use SDL's KMS/DRM output instead, put `ADSB_RADAR_OUTPUT=kms` in
+`/etc/adsb-radar/display.env` and restart the display service. `fbdev` forces
+the framebuffer; `ADSB_RADAR_FBDEV=/dev/fb1` selects another device. The same
+choices are available as `--output auto|fbdev|kms` when running by hand.
 
 ## Configuration and credentials
 
@@ -193,14 +213,16 @@ diagnostics include a separate renderer heartbeat, selected/actual output
 sizes, receiver errors, and effective range/cone settings.
 
 **Admin works, HDMI is blank:** inspect
-`journalctl -u adsb-radar-display -n 100`. Check that the display is on,
+`journalctl -u adsb-radar-display -n 100`. The `HDMI driver=` line shows the
+output in use; it should start with `fbdev`. If it says `KMSDRM`, remove any
+`ADSB_RADAR_OUTPUT=kms` override (see *Output* above). Check that the display is on,
 the connector says `connected`, no desktop owns DRM, and `/dev/dri/` exists.
 `id adsb-radar` should show video, render, input, and tty groups. Start the
 systemd service to get a real tty1; launching a KMS app directly over SSH is
 not equivalent. Reattach a disconnected display and restart the display
 service; the admin remains independent.
 
-**Wrong DRM card:** put `SDL_KMSDRM_DEVICE_INDEX=<card number>` in
+**Wrong DRM card (KMS output only):** put `SDL_KMSDRM_DEVICE_INDEX=<card number>` in
 `/etc/adsb-radar/display.env`, then restart the display service. Use the card
 with the connected HDMI connector. Additional SDL environment overrides can
 go in this file.

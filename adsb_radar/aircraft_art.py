@@ -36,7 +36,6 @@ Color = tuple[int, int, int]
 
 WHITE: Color = (244, 246, 248)
 LIGHT_GREY: Color = (206, 211, 217)
-METAL: Color = (178, 184, 192)
 WINDOW: Color = (38, 48, 60)
 WING: Color = (150, 157, 166)
 SHADOW: Color = (110, 117, 126)
@@ -323,11 +322,6 @@ def _wing(shape: _Shape) -> list[tuple[float, float]]:
     if shape.high_wing:
         return [(x + 0.08, -r * 0.95), (x - 0.06, -r * 0.95), (x - 0.08, -r * 0.7), (x + 0.07, -r * 0.7)]
     return [(x + 0.05, r * 0.55), (x - 0.1, r * 0.55), (x - 0.2, r * 0.25), (x - 0.15, r * 0.2)]
-
-
-def _ellipse_points(cx: float, cy: float, rx: float, ry: float, steps: int = 24) -> list[tuple[float, float]]:
-    return [(cx + rx * math.cos(2 * math.pi * i / steps), cy + ry * math.sin(2 * math.pi * i / steps))
-            for i in range(steps)]
 
 
 def _capsule(x0: float, x1: float, cy: float, ry: float) -> list[tuple[float, float]]:

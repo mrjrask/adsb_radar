@@ -53,15 +53,15 @@ apt-get install -y --no-install-recommends \
     libsdl2-2.0-0 libegl1 libgles2 libgbm1 libdrm2 libgl1-mesa-dri \
     fonts-dejavu-core fonts-bebas-neue fonts-jetbrains-mono ca-certificates rsync kbd passwd
 
-# Use Debian's SDL build with KMS/DRM. PyPI wheels may omit this backend.
-python3 - <<'PY'
+# The display writes to the console framebuffer by default. SDL's KMS/DRM
+# backend is only needed for ADSB_RADAR_OUTPUT=kms, so its absence is a warning.
+python3 - <<'PY' || true
 import ctypes
 library = ctypes.CDLL('libSDL2-2.0.so.0')
 library.SDL_GetVideoDriver.restype = ctypes.c_char_p
 drivers = [library.SDL_GetVideoDriver(i).decode().lower() for i in range(library.SDL_GetNumVideoDrivers())]
 if 'kmsdrm' not in drivers:
-    raise SystemExit('The system SDL2 has no kmsdrm backend. Install a KMS-enabled Raspberry Pi OS build.')
-print('System SDL2 has the KMS/DRM backend.')
+    print('Note: the system SDL2 has no kmsdrm backend; only the default framebuffer output is available.')
 PY
 
 for group in video render input tty adsb-radar; do

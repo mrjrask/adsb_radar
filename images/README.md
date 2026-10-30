@@ -1,9 +1,7 @@
-# Upload images here
-
-No images are bundled. See [the manual asset guide](../docs/ASSETS.md) for the exact paths and filenames.
+# Artwork
 
 - `air/<ICAO>.png`: airline logos.
-- `aircraft/<ICAO>/<TYPE>.png`: aircraft illustrations.
+- `aircraft/<ICAO>/<TYPE>.png`: aircraft illustrations in airline livery.
 - `aircraft/_generic/<TYPE>.png`: generic illustrations.
 
-Keep original filenames, resolution, and transparency. The installer installs only files you have supplied.
+See [the artwork guide](../docs/ASSETS.md) for lookup order and how to add files.

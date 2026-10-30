@@ -1,2 +1,2 @@
-"""Raspberry Pi HDMI client for the Desk Display matrix feed."""
+"""Raspberry Pi HDMI flight board and radar."""
 __version__ = "0.1.0"

@@ -7,7 +7,7 @@ mv=document.getElementById('minv'),hs=[],hh=[],drag=null,poly,
 sd=document.getElementById('side'),st=document.getElementById('sidet'),un=document.getElementById('unit'),
 mr=document.getElementById('MAX_RANGE'),he=document.getElementById('HOME_ELEVATION_FT'),
 ax=0,ab=[],sdrag=null,G=128,SR=105,axl;
-try{ax=(+localStorage.i75ax||0)%4;if(localStorage.i75un)un.value=localStorage.i75un}catch(e){}
+try{ax=(+localStorage.adsbAxis||0)%4;if(localStorage.adsbUnit)un.value=localStorage.adsbUnit}catch(e){}
 // The renderer reports the configured distance unit.
 var su=document.getElementById('srvunit');
 if(su&&su.value){un.value=su.value=='mi'?'5280':su.value=='km'?'3280.84':'6076.12';un.disabled=true}
@@ -32,7 +32,7 @@ t=el('text',{'font-size':9,'text-anchor':'middle',fill:'#111','pointer-events':'
 hs[i].addEventListener('input',draw)});
 [0,1,2,3].forEach(function(a){var b=document.createElement('button');b.type='button';
 b.textContent=S[a+4]+' \u2013 '+S[a];b.style.margin='0';b.onclick=function(){ax=a;
-try{localStorage.i75ax=a}catch(e){}draw()};document.getElementById('axes').appendChild(b);ab[a]=b});
+try{localStorage.adsbAxis=a}catch(e){}draw()};document.getElementById('axes').appendChild(b);ab[a]=b});
 // The side view: sector ax on the right, its opposite on the left, home in the middle.
 function side(){while(sd.firstChild)sd.removeChild(sd.firstChild);
 var u=parseFloat(un.value)||6076.12,D=num(mr),H=num(he),ext,r,step,k,y,ls=[ax+4,ax],w=[];
@@ -88,7 +88,7 @@ x=(sdrag<4?1:-1)*(p[0]-C),e=Math.atan2(G-p[1],x)*180/Math.PI;
 hs[sdrag].value=Math.max(0,Math.min(89,Math.round(e)));draw()});
 sd.addEventListener('pointerup',function(){sdrag=null});
 sd.addEventListener('pointercancel',function(){sdrag=null});
-un.addEventListener('change',function(){try{localStorage.i75un=un.value}catch(e){}draw()});
+un.addEventListener('change',function(){try{localStorage.adsbUnit=un.value}catch(e){}draw()});
 [mr,he].forEach(function(i){if(i)i.addEventListener('input',draw)});
 rg.addEventListener('input',function(){mi.value=rg.value;draw()});mi.addEventListener('input',draw);
 document.getElementById('clr').addEventListener('click',function(){hs.forEach(function(i){i.value=''});

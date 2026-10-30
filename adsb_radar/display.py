@@ -16,46 +16,34 @@ from .config import CONFIG_PATH, DEFAULTS, STATE_PATH, atomic_bytes, display_set
 from .feed import Poller
 from .metadata import Metadata, MetadataWorker
 from .models import LiveAircraft
+from .outputs import CHOICES, open_output, viewport  # noqa: F401  (viewport is re-exported)
 from .scene import Scene
-from .video import PROFILES, open_display
+from .video import PROFILES
 
 LOG = logging.getLogger(__name__)
 
 
-def viewport(source, target):
-    sw, sh = source
-    tw, th = target
-    scale = min(tw / sw, th / sh)
-    width, height = max(1, round(sw * scale)), max(1, round(sh * scale))
-    return (tw - width) // 2, (th - height) // 2, width, height
-
-
-def run(config, state, *, windowed=False, demo=None, frames=None):
+def run(config, state, *, windowed=False, demo=None, frames=None, output=None):
     os.environ.setdefault("PYGAME_HIDE_SUPPORT_PROMPT", "1")
-    if not windowed:
-        os.environ.setdefault("SDL_VIDEODRIVER", "KMSDRM")
-    import pygame
-
-    pygame.display.init()
+    out = open_output(output or os.environ.get("ADSB_RADAR_OUTPUT", "auto"), windowed)
+    errors = out.errors
     resolution = config["RESOLUTION"]
     resolution_error = None
     try:
-        screen, render_size = open_display(pygame, resolution, windowed)
-    except (ValueError, pygame.error) as error:
+        render_size = out.set_resolution(resolution)
+    except errors as error:
         resolution_error = str(error)
         LOG.warning("%s; using the native HDMI mode", error)
-        screen, render_size = open_display(pygame, "auto", windowed)
-    pygame.mouse.set_visible(False)
-    LOG.info("HDMI driver=%s size=%s", pygame.display.get_driver(), screen.get_size())
+        render_size = out.set_resolution("auto")
+    LOG.info("HDMI driver=%s size=%s", out.name, out.size)
     scene = Scene(render_size)
-    clock = pygame.time.Clock()
     began = time.monotonic()
     settings, aircraft, online = config, (), False
     metadata = None if demo else Metadata(state)
     worker = None if demo else MetadataWorker(metadata, config)
     poller = None if demo else Poller(config, state)
     stats = {"version": __version__, "polls": 0, "failures": 0, "healthy_receivers": 0,
-             "driver": pygame.display.get_driver(), "hdmi_size": list(screen.get_size()),
+             "driver": out.name, "hdmi_size": list(out.size),
              "render_size": list(scene.size), "state": "waiting"}
     if resolution_error:
         stats["resolution_error"] = resolution_error
@@ -74,9 +62,8 @@ def run(config, state, *, windowed=False, demo=None, frames=None):
     try:
         while not stopping:
             now, monotonic = time.time(), time.monotonic()
-            for event in pygame.event.get():
-                if event.type == pygame.QUIT or (event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE):
-                    stopping = True
+            if out.quit_requested():
+                stopping = True
             if monotonic >= next_settings:
                 try:
                     settings = display_settings(config, state)
@@ -86,11 +73,11 @@ def run(config, state, *, windowed=False, demo=None, frames=None):
                         # projector/monitor does not advertise the requested mode.
                         resolution = settings["RESOLUTION"]
                         try:
-                            screen, render_size = open_display(pygame, resolution, windowed)
+                            render_size = out.set_resolution(resolution)
                             scene = Scene(render_size)
-                            stats.update(hdmi_size=list(screen.get_size()), render_size=list(render_size))
+                            stats.update(hdmi_size=list(out.size), render_size=list(render_size))
                             stats.pop("resolution_error", None)
-                        except (ValueError, pygame.error) as error:
+                        except errors as error:
                             stats["resolution_error"] = str(error)
                             LOG.warning("Resolution change failed: %s", error)
                 except (OSError, ValueError):
@@ -125,18 +112,8 @@ def run(config, state, *, windowed=False, demo=None, frames=None):
                 next_metadata = monotonic + 1
             image = scene.render(aircraft, settings, metadata, online=online, now=now,
                                  health="Demo feed" if demo else f'{stats["healthy_receivers"]}/{len(config["RECEIVER_URLS"])} feeds online')
-            surface = pygame.image.fromstring(image.tobytes(), image.size, "RGB")
             level = settings.get("BRIGHTNESS") or 1.0
-            if level < 1:
-                surface.set_alpha(round(level * 255))
-            if config["ROTATION"]:
-                surface = pygame.transform.rotate(surface, -config["ROTATION"])
-            x, y, width, height = viewport(surface.get_size(), screen.get_size())
-            screen.fill((0, 0, 0))
-            if (width, height) != surface.get_size():
-                surface = pygame.transform.smoothscale(surface, (width, height))
-            screen.blit(surface, (x, y))
-            pygame.display.flip()
+            out.present(image, config["ROTATION"], level)
             if monotonic >= next_snapshot:
                 stats.update(state="demo" if demo else "online" if online else "offline",
                              heartbeat=now, uptime_seconds=int(monotonic - began), brightness=level,
@@ -154,7 +131,7 @@ def run(config, state, *, windowed=False, demo=None, frames=None):
             count += 1
             if frames and count >= frames:
                 stopping = True
-            clock.tick(config["FPS"])
+            out.tick(config["FPS"])
     finally:
         for thread in (poller, worker):
             if thread:
@@ -162,7 +139,7 @@ def run(config, state, *, windowed=False, demo=None, frames=None):
                 thread.join(timeout=1)
         stats.update(state="stopped", heartbeat=time.time())
         write_json(Path(state) / "status.json", stats)
-        pygame.quit()
+        out.close()
         for sig, handler in old_handlers.items():
             signal.signal(sig, handler)
 
@@ -174,6 +151,9 @@ def main():
     parser.add_argument("--windowed", action="store_true", help="desktop development only")
     parser.add_argument("--demo", choices=("flight", "radar"), help="generated demo; no receiver or images needed")
     parser.add_argument("--resolution", choices=("auto", *PROFILES), help="override the configured output profile")
+    parser.add_argument("--output", choices=CHOICES,
+                        help="fbdev writes /dev/fb0; kms uses SDL2 KMS/DRM; auto (default) prefers fbdev. "
+                             "Also settable with ADSB_RADAR_OUTPUT")
     parser.add_argument("--frames", type=int, help="exit after N frames for smoke testing")
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
@@ -181,9 +161,9 @@ def main():
     if args.resolution:
         config["RESOLUTION"] = args.resolution
     try:
-        run(config, args.state_dir, windowed=args.windowed, demo=args.demo, frames=args.frames)
+        run(config, args.state_dir, windowed=args.windowed, demo=args.demo, frames=args.frames, output=args.output)
     except Exception:
-        LOG.exception("Display stopped. Check KMS/HDMI, device permissions and tty1 in docs/SETUP.md.")
+        LOG.exception("Display stopped. Check HDMI, /dev/fb0 or KMS device permissions and tty1 in docs/SETUP.md.")
         raise SystemExit(1) from None
 
 

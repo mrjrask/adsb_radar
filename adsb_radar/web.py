@@ -125,7 +125,7 @@ def create_app(config_path=CONFIG_PATH, state_path=STATE_PATH, config=None):
             ("HDMI output", str(diagnostics.get("hdmi_size", "unknown"))),
             ("Aircraft feed(s)", ", ".join(config["RECEIVER_URLS"])),
         ], csrf(), message=message, errors=errors, brightness_choices=(1.0, 0.75, 0.5, 0.35, 0.1, 0.02),
-            server=diagnostics.get("effective", {}),
+            effective=diagnostics.get("effective", {}),
             diagnostics=[(key, str(value)) for key, value in diagnostics.items()],
             presets=load_presets(state / "presets.json"))
         body = pieces(parts).replace(b"<section id=board>",

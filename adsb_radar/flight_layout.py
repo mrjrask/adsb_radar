@@ -1,7 +1,7 @@
 """High resolution flight layout adapted from desk_display draw_adsb_overhead.
 
-Artwork uses images/air and images/aircraft; missing files use drawn badges
-and the upstream procedural aircraft fallback. No image assets are bundled.
+Artwork comes from images/air and images/aircraft; missing files use drawn
+badges and the procedural aircraft fallback.
 """
 from __future__ import annotations
 
@@ -20,9 +20,7 @@ from .models import LiveAircraft, haversine_distance
 
 LANCZOS = Image.Resampling.LANCZOS
 ASSET_DIR = Path(os.environ.get("ADSB_RADAR_ASSETS", str(Path(__file__).resolve().parents[1] / "images")))
-FONTS_DIR = os.environ.get("ADSB_RADAR_FONTS", "/usr/share/fonts/truetype/dejavu")
 
-SCREEN_ID = "adsb overhead"
 
 BACKGROUND = (0, 0, 0)
 TEXT = (240, 244, 248)
@@ -34,13 +32,6 @@ CARD_EDGE = (30, 41, 55)
 RADAR_FILL = (8, 14, 22)
 RADAR_RING = (36, 52, 70)
 TRAFFIC = (96, 112, 130)
-# The map under the sky map (services/radar_map.py): dim, so the traffic stays the brightest thing there.
-MAP_WATER = (13, 31, 54)
-MAP_SHORE = (30, 62, 98)
-MAP_RIVER = (24, 50, 84)
-MAP_ROAD = (28, 37, 49)
-MAP_HIGHWAY = (50, 61, 76)
-MAP_RUNWAY = (118, 104, 72)  # sand, so runways never read as grey traffic
 TILE = (246, 247, 249)
 CLIMB = (95, 220, 150)
 DESCEND = (255, 150, 80)
@@ -315,30 +306,6 @@ def _callsign(aircraft: LiveAircraft) -> str:
     return (aircraft.callsign or "").strip().upper() or aircraft.hex.upper()
 
 
-def _board_lines(flight: OverheadFlight, home: Optional[tuple[float, float]], narrow: bool):
-    """(name, route, type, phase label, phase value) as a flight board prints them."""
-
-    aircraft, route, airline = flight.aircraft, flight.route, flight.airline
-    callsign = _callsign(aircraft)
-    type_name = airline_directory.aircraft_type_name(aircraft.aircraft_type)
-    if airline is not None:
-        name = airline.short_name if narrow else airline.name
-    else:
-        name = callsign
-    if route is not None and (route.origin or route.destination):
-        origin = route.origin.code if route.origin else "?"
-        destination = route.destination.code if route.destination else "?"
-        route_text = f"{origin} → {destination}"
-        phase, airport = flight_routes.flight_phase(route, home or (None, None))
-        phase_value = airport.short_name if airport is not None else ""
-    else:
-        route_text = callsign if airline is not None else ""
-        heading = _compass_word(aircraft.track)
-        phase = "Heading" if heading else "Overhead now"
-        phase_value = heading.capitalize() or callsign
-    return name, route_text, type_name, phase, phase_value
-
-
 def route_progress(flight: OverheadFlight, unit: str) -> Optional[tuple[float, float, float]]:
     """(fraction flown, distance flown, distance to go) from the route's airports, or None."""
 
@@ -610,10 +577,6 @@ def _draw_cards(image: Image.Image, box, flight: OverheadFlight, unit: str, *, v
         draw.text((x, value_base), text, font=value_font, fill=TEXT, anchor="ls")
 
 
-
-
-
-
 def _draw_radar(image: Image.Image, box, flight: Optional[OverheadFlight], traffic, radius: float, unit: str,
                 accent, home=None, reach=None) -> None:
     """A sky map centred on the display: a map, range rings, traffic, the overhead flight."""
@@ -723,22 +686,6 @@ def _layout(width: int, height: int) -> dict[str, Any]:
     return boxes
 
 
-def _compose_tiny(image: Image.Image, flight: OverheadFlight, home) -> None:
-    """128x64 OLED: three text lines."""
-
-    width, height = image.size
-    draw = ImageDraw.Draw(image)
-    margin = 2
-    name, route_text, type_name, _phase, phase_value = _board_lines(flight, home, True)
-    third = flight.route and phase_value or altitude_text(flight.aircraft.altitude_ft)
-    line = (height - 2 * margin) / 3
-    y = margin
-    for text, fill, bold in ((name, TEXT, True), (route_text or type_name, accent_color(flight.airline), True),
-                             (third, SECONDARY, False)):
-        _text_line(draw, margin, y + line * 0.82, text, line * 0.62, width - 2 * margin, fill, bold=bold, minimum=6)
-        y += line
-
-
 def _wash(image: Image.Image, accent, depth: float) -> None:
     """A soft glow of the airline's colour across the top of the screen."""
 
@@ -795,78 +742,22 @@ def _draw_aircraft(image: Image.Image, box, flight: OverheadFlight) -> None:
     image.paste(art, (x, y), art)
 
 
-def _compose_message(image: Image.Image, title: str, detail: str, *, traffic=(), radius: float = 10,
-                     unit: str = "nm", home=None) -> None:
-    width, height = image.size
-    draw = ImageDraw.Draw(image)
-    margin = max(2, round(min(width, height) * 0.05))
-    if height >= width * 0.85 and width >= 480:
-        # Square: the sky map on top, the message centred beneath it.
-        side = round(height * 0.66)
-        _draw_radar(image, ((width - side) / 2, margin, (width + side) / 2, margin + side), None, traffic, radius,
-                    unit, DEFAULT_ACCENT, home)
-        title_cap = width * 0.05
-        base = margin + side + (height - margin - side) * 0.45
-        _text_line(draw, width / 2, base, title, title_cap, width - 2 * margin, TEXT, bold=True, anchor="ms")
-        _text_line(draw, width / 2, base + title_cap * 1.9, detail, title_cap * 0.6, width - 2 * margin, LABEL,
-                   anchor="ms")
-        return
-    if width >= 480 and height >= 240:
-        # Big panels keep the sky map, so "clear skies" still shows the traffic further out.
-        side = min(height - 2 * margin, round(width * 0.5))
-        top = (height - side) / 2
-        _draw_radar(image, (margin * 2, top, margin * 2 + side, top + side), None, traffic, radius, unit,
-                    DEFAULT_ACCENT, home)
-        text_left = margin * 4 + side
-        text_w = width - margin - text_left
-        title_cap = min(height * 0.07, text_w * 0.08)
-        _text_line(draw, text_left, height / 2 - title_cap * 0.3, title, title_cap, text_w, TEXT, bold=True)
-        _text_line(draw, text_left, height / 2 + title_cap * 1.4, detail, title_cap * 0.6, text_w, LABEL)
-        return
-    content_w = width - 2 * margin
-    glyph = height * (0.22 if height >= 100 else 0.26)
-    title_cap = height * 0.075 if height >= 100 else height * 0.13
-    detail_cap = title_cap * 0.7
-    gap = height * 0.06
-    total = glyph + gap + title_cap + gap * 0.7 + detail_cap
-    top = (height - total) / 2
-    smooth = _Smooth(image, (width / 2 - glyph, top, width / 2 + glyph, top + glyph))
-    smooth.polygon(_plane_points(width / 2, top + glyph / 2, glyph, 45), fill=FALLBACK_BADGE + (255,))
-    smooth.paste()
-    title_font, title = _fit(draw, title, title_cap, content_w, bold=True, minimum=6)
-    detail_font, detail = _fit(draw, detail, detail_cap, content_w, minimum=6)
-    title_base = top + glyph + gap + title_cap
-    draw.text((width / 2, title_base), title, font=title_font, fill=TEXT, anchor="ms")
-    draw.text((width / 2, title_base + gap * 0.7 + detail_cap), detail, font=detail_font, fill=LABEL, anchor="ms")
-
-
 def compose_overhead_image(
-    flight: Optional[OverheadFlight],
+    flight: OverheadFlight,
     *,
     width: Optional[int] = None,
     height: Optional[int] = None,
     home: Optional[tuple[float, float]] = None,
     unit: Optional[str] = None,
     radius: Optional[float] = None,
-    has_data: bool = True,
-    traffic: tuple[LiveAircraft, ...] = (),
     radar_range: Optional[float] = None,
 ) -> Image.Image:
-    """The adsb overhead screen for *flight* (None: nothing within the radius; *traffic* is further out)."""
+    """The flight board for *flight*. Idle screens (radar, clock, clear skies) are drawn by scene.py."""
 
     width = int(width or 1920)
     height = int(height or 1080)
     unit = unit or "nm"
     radius = 3.0 if radius is None else radius
     image = Image.new("RGB", (width, height), BACKGROUND)
-    if not has_data:
-        _compose_message(image, "No ADS-B data yet", "Waiting for the receivers", radius=radius, unit=unit,
-                         home=home)
-    elif flight is None:
-        _compose_message(image, "Clear skies overhead", f"No aircraft within {radius:g} {unit}", traffic=traffic,
-                         radius=radius, unit=unit, home=home)
-    elif height < 100:
-        _compose_tiny(image, flight, home)
-    else:
-        _compose_flight(image, flight, home, unit, radius, radar_range)
+    _compose_flight(image, flight, home, unit, radius, radar_range)
     return image

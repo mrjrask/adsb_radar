@@ -6,7 +6,7 @@ from PIL import Image
 
 from adsb_radar import aircraft_art, flight_layout, flight_routes
 from adsb_radar.display import viewport
-from adsb_radar.forms import RADAR_COLOR_DEFAULTS, RADAR_COLOR_NIGHT
+from adsb_radar.forms import BUILTIN_PRESETS, RADAR_COLOR_DEFAULTS
 from adsb_radar.metadata import Metadata
 from adsb_radar.models import advance
 from adsb_radar.scene import Scene, select_flight
@@ -52,7 +52,7 @@ def test_theme_and_controls_change_radar(config, distant):
     scene = Scene((800, 480))
     stamp = time.time()
     normal = scene.render((distant,), {**config, **RADAR_COLOR_DEFAULTS}, now=stamp)
-    night = scene.render((distant,), {**config, **RADAR_COLOR_NIGHT}, now=stamp)
+    night = scene.render((distant,), {**config, **BUILTIN_PRESETS["Night"]}, now=stamp)
     assert normal.tobytes() != night.tobytes()
     no_beam = scene.render((distant,), {**config, "RADAR_SWEEP": False, "RADAR_LIGHTS": False,
                                            "RADAR_MOTION": False}, now=stamp)
