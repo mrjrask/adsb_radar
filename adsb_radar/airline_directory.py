@@ -1,0 +1,503 @@
+"""Airline and aircraft-type names for the "adsb overhead" screen.
+
+ADS-B gives a callsign ("UAE215") and, through the type database, an ICAO
+type designator ("A388"). Flight boards print "Emirates" and "A380-800", so
+this module maps both. Airlines come from the Soaring Symbols catalog
+(https://github.com/anhthang/soaring-symbols, also the logo source in
+``scripts/logo_getter.py``), plus North American regionals, cargo and charter
+operators that catalog lacks. Each airline has its IATA code and brand colour
+(the fallback badge when ``images/air/<ICAO>.png`` is missing).
+
+The route lookup (``services/flight_routes.py``) also returns an airline
+name; this table only fills in when there is no route.
+"""
+from __future__ import annotations
+
+import re
+from dataclasses import dataclass
+from typing import Optional
+
+# ICAO code: (name, IATA code, brand colour)
+AIRLINES: dict[str, tuple[str, str, str]] = {
+    "AAL": ('American Airlines', 'AA', '#0078d2'),
+    "AAR": ('Asiana Airlines', 'OZ', '#4a4f54'),
+    "AAY": ('Allegiant Air', 'G4', '#f6a800'),
+    "ABN": ('Air Albania', 'ZB', '#ce1f2e'),
+    "ABX": ('ABX Air', 'GB', '#004b87'),
+    "ABY": ('Air Arabia', 'G9', '#ed1b48'),
+    "ACA": ('Air Canada', 'AC', '#f01428'),
+    "AEA": ('Air Europa', 'UX', '#006fde'),
+    "AEE": ('Aegean Airlines', 'A3', '#002677'),
+    "AFR": ('Air France', 'AF', '#051039'),
+    "AHY": ('Azerbaijan Airlines', 'J2', '#082e6a'),
+    "AIC": ('Air India', 'AI', '#da0e29'),
+    "AIQ": ('Thai AirAsia', 'FD', '#ff0000'),
+    "AJT": ('Amerijet International', 'M6', '#0055a5'),
+    "AKJ": ('Akasa Air', 'QP', '#ff6300'),
+    "AMF": ('Ameriflight', 'A8', '#1f3a68'),
+    "AMX": ('Aeroméxico', 'AM', '#020c41'),
+    "ANA": ('All Nippon Airways', 'NH', '#00146e'),
+    "ANZ": ('Air New Zealand', 'NZ', '#000000'),
+    "APG": ('Philippines AirAsia', 'Z2', '#ff0000'),
+    "APJ": ('Peach Aviation', 'MM', '#9b308c'),
+    "ARE": ('LATAM Airlines Colombia', '4C', '#1b0088'),
+    "ARG": ('Aerolíneas Argentinas', 'AR', '#0080be'),
+    "ASA": ('Alaska Airlines', 'AS', '#01426a'),
+    "ASH": ('Mesa Airlines', 'YV', '#1414d2'),
+    "ASL": ('Air Serbia', 'JU', '#0e203f'),
+    "ATN": ('Air Transport International', '8C', '#1f3a68'),
+    "AUA": ('Austrian Airlines', 'OS', '#d81824'),
+    "AVA": ('avianca', 'AV', '#ff0000'),
+    "AWI": ('Air Wisconsin', 'ZW', '#0a3d7a'),
+    "AWQ": ('Indonesia AirAsia', 'QZ', '#ff0000'),
+    "AXM": ('AirAsia', 'AK', '#ff0000'),
+    "AZP": ('Paranair', 'ZP', '#0037a2'),
+    "AZU": ('Azul', 'AD', '#005baa'),
+    "BAV": ('Bamboo Airways', 'QH', '#64ae53'),
+    "BAW": ('British Airways', 'BA', '#2e5c99'),
+    "BEE": ('Flybe', 'BE', '#5a3f99'),
+    "BEL": ('Brussels Airlines', 'SN', '#051446'),
+    "BER": ('Air Berlin', 'AB', '#cc2234'),
+    "BKP": ('Bangkok Airways', 'PG', '#000f8f'),
+    "BOX": ('AeroLogic', '3S', '#05164d'),
+    "BTI": ('airBaltic', 'BT', '#152649'),
+    "CAL": ('China Airlines', 'CI', '#2b3088'),
+    "CAO": ('Air China Cargo', 'CA', '#ed1c24'),
+    "CCA": ('Air China', 'CA', '#ed1c24'),
+    "CEB": ('Cebu Pacific', '5J', '#0096d6'),
+    "CES": ('China Eastern Airlines', 'MU', '#1a4fa3'),
+    "CFG": ('Condor', 'DE', '#000000'),
+    "CFS": ('Empire Airlines', 'EM', '#1f3a68'),
+    "CHH": ('Hainan Airlines', 'HU', '#d71920'),
+    "CJT": ('Cargojet', 'W8', '#e31b23'),
+    "CKK": ('China Cargo Airlines', 'CK', '#1a4fa3'),
+    "CKS": ('Kalitta Air', 'K4', '#b8862b'),
+    "CLX": ('Cargolux', 'CV', '#d6001c'),
+    "CMB": ('US Transcom', '', '#3a4a5a'),
+    "CMP": ('Copa Airlines', 'CM', '#0032a0'),
+    "CPA": ('Cathay Pacific', 'CX', '#005d63'),
+    "CPZ": ('Compass Airlines', 'CP', '#0a3d7a'),
+    "CSN": ('China Southern Airlines', 'CZ', '#0093d0'),
+    "CXA": ('XiamenAir', 'MF', '#008cd5'),
+    "DAH": ('Air Algérie', 'AH', '#e2231a'),
+    "DAL": ('Delta Air Lines', 'DL', '#e31837'),
+    "DLA": ('Air Dolomiti', 'EN', '#009eb3'),
+    "DLH": ('Lufthansa', 'LH', '#05164d'),
+    "EDV": ('Endeavor Air', '9E', '#c8102e'),
+    "EIN": ('Aer Lingus', 'EI', '#006472'),
+    "EJA": ('NetJets', '1I', '#5a6470'),
+    "ENY": ('Envoy Air', 'MQ', '#4b2a83'),
+    "ETD": ('Etihad Airways', 'EY', '#bd8b13'),
+    "ETH": ('Ethiopian Airlines', 'ET', '#b71d20'),
+    "EVA": ('EVA Air', 'BR', '#00a64f'),
+    "EWG": ('Eurowings', 'EW', '#7c2045'),
+    "EWR": ('Ewa Air', 'ZD', '#e1251b'),
+    "EXS": ('Jet2.com', 'LS', '#d71920'),
+    "EZY": ('easyJet', 'U2', '#ff6600'),
+    "FDB": ('flydubai', 'FZ', '#ff8200'),
+    "FDX": ('FedEx Express', 'FX', '#4d148c'),
+    "FFM": ('Firefly', 'FY', '#ef5713'),
+    "FFT": ('Frontier Airlines', 'F9', '#008c44'),
+    "FIN": ('Finnair', 'AY', '#0c0243'),
+    "FJI": ('Fiji Airways', 'FJ', '#473729'),
+    "FLE": ('Flair Airlines', 'F8', '#8bc34a'),
+    "FLI": ('Atlantic Airways', 'RC', '#004c93'),
+    "GEC": ('Lufthansa Cargo', 'LH', '#05164d'),
+    "GIA": ('Garuda Indonesia', 'GA', '#002560'),
+    "GJS": ('GoJet Airlines', 'G7', '#1414d2'),
+    "GLG": ('Avianca Ecuador', '2K', '#ff0000'),
+    "GLO": ('GOL', 'G3', '#f58220'),
+    "GTI": ('Atlas Air', '5Y', '#002d72'),
+    "HAL": ('Hawaiian Airlines', 'HA', '#4e2582'),
+    "HKE": ('HK Express', 'UO', '#702b91'),
+    "HVN": ('Vietnam Airlines', 'VN', '#d99e09'),
+    "IBE": ('Iberia', 'IB', ''),
+    "ICE": ('Icelandair', 'FI', '#0c0243'),
+    "ICL": ('CAL Cargo Air Lines', '5C', '#0a3d7a'),
+    "IGO": ('IndiGo', '6E', '#001b94'),
+    "ITY": ('ITA Airways', 'AZ', '#006643'),
+    "JAL": ('Japan Airlines', 'JL', '#e50012'),
+    "JBU": ('JetBlue Airways', 'B6', '#003876'),
+    "JIA": ('PSA Airlines', 'OH', '#0078d2'),
+    "JJP": ('Jetstar Japan', 'GK', '#ff5111'),
+    "JRE": ('JSX', 'XE', '#1c1c1c'),
+    "JST": ('Jetstar', 'JQ', '#ff5111'),
+    "JZA": ('Jazz', 'QK', '#f15a29'),
+    "KAC": ('Kuwait Airways', 'KU', '#1c285b'),
+    "KAL": ('Korean Air', 'KE', '#051766'),
+    "KAP": ('Cape Air', '9K', '#0a3d7a'),
+    "KLM": ('KLM', 'KL', '#009fd9'),
+    "KNE": ('flynas', 'XY', '#00b7ac'),
+    "KQA": ('Kenya Airways', 'KQ', '#ed1c24'),
+    "KTC": ('AirAsia Cambodia', 'KT', '#ff0000'),
+    "KZR": ('Air Astana', 'KC', '#a48c5d'),
+    "LAN": ('LATAM Airlines', 'LA', '#1b0088'),
+    "LAP": ('LATAM Airlines Paraguay', 'PZ', '#1b0088'),
+    "LNE": ('LATAM Airlines Ecuador', 'XL', '#1b0088'),
+    "LNI": ('Lion Air', 'JT', '#ed1b2f'),
+    "LOF": ('Trans States Airlines', 'AX', '#1414d2'),
+    "LOT": ('LOT Polish Airlines', 'LO', '#252668'),
+    "LPE": ('LATAM Airlines Perú', 'LP', '#1b0088'),
+    "LRC": ('Avianca Costa Rica', 'LR', '#ff0000'),
+    "LXJ": ('Flexjet', 'LXJ', '#2b2b2b'),
+    "MAS": ('Malaysia Airlines', 'MH', '#174887'),
+    "MAU": ('Air Mauritius', 'MK', '#be2239'),
+    "MSR": ('EgyptAir', 'MS', '#002855'),
+    "MTN": ('Mountain Air Cargo', '', '#1f3a68'),
+    "MXY": ('Breeze Airways', 'MX', '#0b2b5c'),
+    "NAX": ('Norwegian Air Shuttle', 'DY', '#d81939'),
+    "NJE": ('NetJets Europe', '1I', '#5a6470'),
+    "NKS": ('Spirit Airlines', 'NK', '#ffec00'),
+    "NOZ": ('Norwegian Air Shuttle', 'DY', '#d81939'),
+    "OMA": ('Oman Air', 'WY', '#b39759'),
+    "PAC": ('Polar Air Cargo', 'PO', '#004b87'),
+    "PAL": ('Philippine Airlines', 'PR', '#001f60'),
+    "PDT": ('Piedmont Airlines', 'PT', '#0078d2'),
+    "PSA": ('PSA Airlines', 'OH', '#0078d2'),
+    "PGT": ('Pegasus Airlines', 'PC', '#fdb913'),
+    "PIC": ('Pacific Airlines', 'BL', '#324471'),
+    "POE": ('Porter Airlines', 'PD', '#0a2240'),
+    "QAC": ('Qatar Airways Cargo', 'QR', '#662046'),
+    "QFA": ('Qantas', 'QF', ''),
+    "QTR": ('Qatar Airways', 'QR', '#662046'),
+    "QXE": ('Horizon Air', 'QX', '#01426a'),
+    "RAM": ('Royal Air Maroc', 'AT', '#c20831'),
+    "RBA": ('Royal Brunei Airlines', 'BI', '#ffe600'),
+    "RCH": ('Reach (US Air Force)', '', '#3a4a5a'),
+    "ROT": ('TAROM', 'RO', '#003366'),
+    "ROU": ('Air Canada Rouge', 'RV', '#e31837'),
+    "RPA": ('Republic Airways', 'YX', '#0a3161'),
+    "RXI": ('Riyadh Air', 'RX', '#240852'),
+    "RYR": ('Ryanair', 'FR', '#073590'),
+    "SAS": ('Scandinavian Airlines', 'SK', '#000099'),
+    "SCX": ('Sun Country Airlines', 'SY', '#f5a000'),
+    "SIA": ('Singapore Airlines', 'SQ', '#232f67'),
+    "SIL": ('Silver Airways', '3M', '#5c6670'),
+    "SJX": ('Starlux Airlines', 'JX', '#996a4e'),
+    "SKW": ('SkyWest Airlines', 'OO', '#1d3c6e'),
+    "SOO": ('Southern Air', '9S', '#003a70'),
+    "SPQ": ('Sun PhuQuoc Airways', '9G', '#ca1c2a'),
+    "SQC": ('Singapore Airlines Cargo', 'SQ', '#232f67'),
+    "SVA": ('Saudia', 'SV', '#0a6937'),
+    "SWA": ('Southwest Airlines', 'WN', '#304cb2'),
+    "SWG": ('Sunwing Airlines', 'WG', '#f7a800'),
+    "SWR": ('SWISS', 'LX', '#cf0a2c'),
+    "SZS": ('SAS Connect', 'SL', '#000099'),
+    "TAI": ('Avianca El Salvador', 'TA', '#ff0000'),
+    "TAM": ('LATAM Airlines Brasil', 'JJ', '#1b0088'),
+    "TAP": ('TAP Air Portugal', 'TP', '#bfd730'),
+    "TGW": ('Scoot', 'TR', '#ffe900'),
+    "THA": ('Thai Airways', 'TG', '#330066'),
+    "THY": ('Turkish Airlines', 'TK', '#c90019'),
+    "TOS": ('Tropic Ocean Airways', '', '#1f3a68'),
+    "TRA": ('Transavia', 'HV', '#00d66c'),
+    "TSC": ('Air Transat', 'TS', '#172b54'),
+    "TWB": ("T'way Air", 'TW', '#d22c25'),
+    "UAE": ('Emirates', 'EK', '#d71921'),
+    "UAL": ('United Airlines', 'UA', '#1414d2'),
+    "UBA": ('Myanmar National Airlines', 'UB', '#fdb515'),
+    "UCA": ('CommutAir', 'C5', '#1414d2'),
+    "UPS": ('UPS Airlines', '5X', '#351c15'),
+    "VAG": ('Vietravel Airlines', 'VU', '#0066b3'),
+    "VIR": ('Virgin Atlantic', 'VS', '#da0530'),
+    "VIV": ('Viva', 'VB', '#00ae44'),
+    "VJC": ('VietJet Air', 'VJ', '#e12127'),
+    "VLG": ('Vueling', 'VY', '#ffcc00'),
+    "VOE": ('Volotea', 'V7', '#ed164a'),
+    "VOI": ('Volaris', 'Y4', '#5b2d82'),
+    "VOZ": ('Virgin Australia', 'VA', '#e31e23'),
+    "VXP": ('Avelo Airlines', 'XP', '#6a1b9a'),
+    "WAZ": ('Wizz Air Abu Dhabi', '5W', '#c6007e'),
+    "WEN": ('WestJet Encore', 'WR', '#00aaa6'),
+    "WGN": ('Western Global Airlines', 'KD', '#0b3d91'),
+    "WJA": ('WestJet', 'WS', '#00aaa6'),
+    "WUK": ('Wizz Air UK', 'W9', '#c6007e'),
+    "WZZ": ('Wizz Air', 'W6', '#c6007e'),
+    "XOJ": ('XOJET', '', '#3a3a3a'),
+}
+
+# ICAO type designator: the name flight boards print.
+AIRCRAFT_TYPES: dict[str, str] = {
+    "A139": "AW139",
+    "A19N": "A319neo",
+    "A20N": "A320neo",
+    "A21N": "A321neo",
+    "A306": "A300-600",
+    "A30B": "A300",
+    "A310": "A310",
+    "A318": "A318",
+    "A319": "A319",
+    "A320": "A320",
+    "A321": "A321",
+    "A332": "A330-200",
+    "A333": "A330-300",
+    "A338": "A330-800neo",
+    "A339": "A330-900neo",
+    "A342": "A340-200",
+    "A343": "A340-300",
+    "A345": "A340-500",
+    "A346": "A340-600",
+    "A359": "A350-900",
+    "A35K": "A350-1000",
+    "A388": "A380-800",
+    "AT43": "ATR 42-300",
+    "AT45": "ATR 42-500",
+    "AT46": "ATR 42-600",
+    "AT72": "ATR 72",
+    "AT75": "ATR 72-500",
+    "AT76": "ATR 72-600",
+    "B06": "Bell 206",
+    "B190": "Beech 1900",
+    "B350": "King Air 350",
+    "B37M": "737 MAX 7",
+    "B38M": "737 MAX 8",
+    "B39M": "737 MAX 9",
+    "B3XM": "737 MAX 10",
+    "B407": "Bell 407",
+    "B52": "B-52",
+    "B712": "717-200",
+    "B721": "727-100",
+    "B722": "727-200",
+    "B732": "737-200",
+    "B733": "737-300",
+    "B734": "737-400",
+    "B735": "737-500",
+    "B736": "737-600",
+    "B737": "737-700",
+    "B738": "737-800",
+    "B739": "737-900",
+    "B742": "747-200",
+    "B744": "747-400",
+    "B748": "747-8",
+    "B74S": "747SP",
+    "B752": "757-200",
+    "B753": "757-300",
+    "B762": "767-200",
+    "B763": "767-300",
+    "B764": "767-400",
+    "B772": "777-200",
+    "B773": "777-300",
+    "B778": "777-8",
+    "B779": "777-9",
+    "B77L": "777-200LR",
+    "B77W": "777-300ER",
+    "B788": "787-8",
+    "B789": "787-9",
+    "B78X": "787-10",
+    "BCS1": "A220-100",
+    "BCS3": "A220-300",
+    "BE20": "King Air 200",
+    "BE30": "King Air 300",
+    "BE36": "Bonanza",
+    "BE58": "Baron",
+    "BE9L": "King Air 90",
+    "C130": "C-130 Hercules",
+    "C150": "Cessna 150",
+    "C152": "Cessna 152",
+    "C17": "C-17 Globemaster",
+    "C172": "Cessna 172",
+    "C182": "Cessna 182",
+    "C206": "Cessna 206",
+    "C208": "Cessna Caravan",
+    "C210": "Cessna 210",
+    "C25A": "Citation CJ2",
+    "C25B": "Citation CJ3",
+    "C25C": "Citation CJ4",
+    "C30J": "C-130J",
+    "C510": "Citation Mustang",
+    "C525": "CitationJet",
+    "C550": "Citation II",
+    "C560": "Citation V",
+    "C56X": "Citation Excel",
+    "C5M": "C-5M Galaxy",
+    "C680": "Citation Sovereign",
+    "C68A": "Citation Latitude",
+    "C700": "Citation Longitude",
+    "C750": "Citation X",
+    "CL30": "Challenger 300",
+    "CL35": "Challenger 350",
+    "CL60": "Challenger 600",
+    "CRJ1": "CRJ100",
+    "CRJ2": "CRJ200",
+    "CRJ7": "CRJ700",
+    "CRJ9": "CRJ900",
+    "CRJX": "CRJ1000",
+    "DA40": "Diamond DA40",
+    "DA42": "Diamond DA42",
+    "DC10": "DC-10",
+    "DC93": "DC-9",
+    "DH8A": "Dash 8-100",
+    "DH8B": "Dash 8-200",
+    "DH8C": "Dash 8-300",
+    "DH8D": "Dash 8 Q400",
+    "E135": "ERJ-135",
+    "E140": "ERJ-140",
+    "E145": "ERJ-145",
+    "E170": "E170",
+    "E190": "E190",
+    "E195": "E195",
+    "E290": "E190-E2",
+    "E295": "E195-E2",
+    "E50P": "Phenom 100",
+    "E545": "Praetor 500",
+    "E550": "Praetor 600",
+    "E55P": "Phenom 300",
+    "E75L": "E175",
+    "E75S": "E175",
+    "EC35": "EC135",
+    "EC45": "H145",
+    "F2TH": "Falcon 2000",
+    "F900": "Falcon 900",
+    "FA50": "Falcon 50",
+    "FA7X": "Falcon 7X",
+    "FA8X": "Falcon 8X",
+    "FA900": "Falcon 900",
+    "G280": "Gulfstream G280",
+    "GA5C": "Gulfstream G500",
+    "GA6C": "Gulfstream G600",
+    "GL5T": "Global 5000",
+    "GL7T": "Global 7500",
+    "GLEX": "Global Express",
+    "GLF4": "Gulfstream IV",
+    "GLF5": "Gulfstream V",
+    "GLF6": "Gulfstream G650",
+    "H25B": "Hawker 800",
+    "HDJT": "HondaJet",
+    "K35R": "KC-135",
+    "KC46": "KC-46",
+    "LJ35": "Learjet 35",
+    "LJ45": "Learjet 45",
+    "LJ60": "Learjet 60",
+    "LJ75": "Learjet 75",
+    "MD11": "MD-11",
+    "MD82": "MD-82",
+    "MD83": "MD-83",
+    "MD88": "MD-88",
+    "MD90": "MD-90",
+    "P28A": "Piper Cherokee",
+    "P28R": "Piper Arrow",
+    "PA32": "Piper Saratoga",
+    "PA46": "Piper Malibu",
+    "PC12": "Pilatus PC-12",
+    "PC24": "Pilatus PC-24",
+    "R44": "Robinson R44",
+    "S76": "Sikorsky S-76",
+    "SF34": "Saab 340",
+    "SF50": "Cirrus Vision Jet",
+    "SR20": "Cirrus SR20",
+    "SR22": "Cirrus SR22",
+}
+
+# Who makes each type, for boards that print the maker on its own line. The
+# first entry whose prefix starts the board name wins; with strip=True the
+# prefix is the maker's word and comes off the model line.
+_MAKERS: tuple[tuple[str, str, bool], ...] = (
+    ("Cessna ", "Cessna", True),
+    ("Citation", "Cessna", False),
+    ("Piper ", "Piper", True),
+    ("Diamond ", "Diamond", True),
+    ("Cirrus ", "Cirrus", True),
+    ("Pilatus ", "Pilatus", True),
+    ("Robinson ", "Robinson", True),
+    ("Sikorsky ", "Sikorsky", True),
+    ("Bell ", "Bell", True),
+    ("Beech ", "Beechcraft", True),
+    ("King Air", "Beechcraft", False),
+    ("Bonanza", "Beechcraft", False),
+    ("Baron", "Beechcraft", False),
+    ("Saab ", "Saab", True),
+    ("Gulfstream ", "Gulfstream", True),
+    ("Hawker ", "Hawker", True),
+    ("ATR ", "ATR", True),
+    ("HondaJet", "Honda", False),
+    ("Challenger", "Bombardier", False),
+    ("Global", "Bombardier", False),
+    ("Learjet", "Bombardier", False),
+    ("CRJ", "Bombardier", False),
+    ("Dash 8", "De Havilland", False),
+    ("ERJ", "Embraer", False),
+    ("E1", "Embraer", False),
+    ("Phenom", "Embraer", False),
+    ("Praetor", "Embraer", False),
+    ("Falcon", "Dassault", False),
+    ("MD-", "McDonnell Douglas", False),
+    ("DC-", "McDonnell Douglas", False),
+    ("AW", "Leonardo", False),
+    ("EC", "Airbus", False),
+    ("H1", "Airbus", False),
+    ("A2", "Airbus", False),
+    ("A3", "Airbus", False),
+    ("7", "Boeing", False),
+    ("B-52", "Boeing", False),
+    ("C-17", "Boeing", False),
+    ("KC-", "Boeing", False),
+    ("C-130", "Lockheed", False),
+    ("C-5", "Lockheed", False),
+)
+
+_AIRLINE_SUFFIX_RE = re.compile(r"\s+(Airlines|Air Lines|Airways|Airline)$", re.I)
+
+
+@dataclass(frozen=True)
+class Airline:
+    icao: str
+    name: str
+    iata: str
+    color: Optional[tuple[int, int, int]]
+
+    @property
+    def short_name(self) -> str:
+        """'Alaska Airlines' -> 'Alaska'; 'Air Canada' and 'Korean Air' stay."""
+
+        short = _AIRLINE_SUFFIX_RE.sub("", self.name).strip()
+        return short or self.name
+
+
+def _hex_color(value: str) -> Optional[tuple[int, int, int]]:
+    text = (value or "").strip().lstrip("#")
+    if len(text) != 6:
+        return None
+    try:
+        return tuple(int(text[i:i + 2], 16) for i in (0, 2, 4))  # type: ignore[return-value]
+    except ValueError:
+        return None
+
+
+def airline_code(callsign: Optional[str]) -> Optional[str]:
+    """ICAO airline code of a flight callsign ("UAL123" -> "UAL"), or None."""
+
+    match = re.match(r"^([A-Z]{3})\d", (callsign or "").strip().upper())
+    return match.group(1) if match else None
+
+
+def airline_for(icao: Optional[str], *, name: str = "", iata: str = "") -> Optional[Airline]:
+    """The airline for *icao*; *name*/*iata* (from a route lookup) win when given."""
+
+    code = (icao or "").strip().upper()
+    known = AIRLINES.get(code)
+    if known is None and not name:
+        return None
+    known_name, known_iata, color = known or ("", "", "")
+    return Airline(icao=code, name=name or known_name, iata=iata or known_iata, color=_hex_color(color))
+
+
+def aircraft_type_name(designator: Optional[str]) -> str:
+    """'A388' -> 'A380-800'; an unknown designator is returned as is."""
+
+    code = (designator or "").strip().upper()
+    return AIRCRAFT_TYPES.get(code, code)
+
+
+def aircraft_type_lines(designator: Optional[str]) -> tuple[str, str]:
+    """'B38M' -> ('Boeing', '737 MAX 8'); ('', name) when the maker is unknown."""
+
+    name = aircraft_type_name(designator)
+    if (designator or "").strip().upper() not in AIRCRAFT_TYPES:
+        return "", name
+    for prefix, maker, strip in _MAKERS:
+        if name.startswith(prefix):
+            return maker, name[len(prefix):].strip() if strip else name
+    return "", name
+
+
+__all__ = ["AIRCRAFT_TYPES", "AIRLINES", "Airline", "aircraft_type_lines", "aircraft_type_name", "airline_code", "airline_for"]

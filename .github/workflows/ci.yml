@@ -1,0 +1,49 @@
+name: Tests and installer
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  python:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python: ['3.11', '3.13']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '${{ matrix.python }}'
+          cache: pip
+      - name: Install test dependencies and fonts
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y fonts-dejavu-core fonts-bebas-neue fonts-jetbrains-mono shellcheck
+          python -m pip install -r requirements-dev.txt
+      - name: Lint Python, JavaScript, and shell scripts
+        run: |
+          ruff check .
+          node --check adsb_radar/static/admin.js
+          shellcheck install.sh uninstall.sh scripts/*.sh
+          bash -n install.sh uninstall.sh scripts/*.sh
+      - name: Test rendering, receiver polling, authentication, and settings
+        env:
+          SDL_VIDEODRIVER: dummy
+          PYGAME_HIDE_SUPPORT_PROMPT: '1'
+        run: python -m pytest -q
+
+  trixie-installer:
+    strategy:
+      matrix:
+        runner: [ubuntu-latest, ubuntu-24.04-arm]
+    runs-on: '${{ matrix.runner }}'
+    container: debian:trixie
+    steps:
+      - name: Prepare checkout tools
+        run: apt-get update && apt-get install -y git ca-certificates
+      - uses: actions/checkout@v4
+      - name: Exercise actual apt install, upgrade, uninstall, and purge
+        run: bash scripts/ci-install-smoke.sh

@@ -1,0 +1,26 @@
+[Unit]
+Description=ADS-B Radar web administration
+After=network.target
+StartLimitIntervalSec=0
+ConditionPathExists=/etc/adsb-radar/config.json
+
+[Service]
+Type=simple
+User=adsb-radar
+Group=adsb-radar
+WorkingDirectory=/opt/adsb-radar
+Environment=PYTHONDONTWRITEBYTECODE=1
+ExecStart=/usr/bin/python3 -m adsb_radar.admin
+Restart=always
+RestartSec=5
+TimeoutStopSec=15
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/var/lib/adsb-radar
+PrivateTmp=yes
+PrivateDevices=yes
+UMask=0027
+
+[Install]
+WantedBy=multi-user.target

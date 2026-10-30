@@ -1,0 +1,43 @@
+[Unit]
+Description=ADS-B Radar HDMI display (KMS/DRM)
+Wants=network-online.target
+After=network-online.target systemd-user-sessions.service
+Conflicts=getty@tty1.service
+StartLimitIntervalSec=0
+ConditionPathExists=/etc/adsb-radar/config.json
+
+[Service]
+Type=simple
+User=adsb-radar
+Group=adsb-radar
+SupplementaryGroups=video render input tty
+WorkingDirectory=/opt/adsb-radar
+Environment=PYGAME_HIDE_SUPPORT_PROMPT=1
+Environment=SDL_VIDEODRIVER=kmsdrm
+Environment=SDL_AUDIODRIVER=dummy
+Environment=ADSB_RADAR_ASSETS=/var/lib/adsb-radar/images
+Environment=PYTHONDONTWRITEBYTECODE=1
+Environment=TERM=linux
+EnvironmentFile=-/etc/adsb-radar/display.env
+ExecStartPre=+/usr/bin/chvt 1
+ExecStart=/usr/bin/python3 -m adsb_radar.display
+Restart=always
+RestartSec=5
+TimeoutStopSec=15
+StandardInput=tty
+StandardOutput=journal
+StandardError=journal
+TTYPath=/dev/tty1
+TTYReset=yes
+TTYVHangup=yes
+TTYVTDisallocate=yes
+UtmpIdentifier=tty1
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/var/lib/adsb-radar
+PrivateTmp=yes
+UMask=0027
+
+[Install]
+WantedBy=multi-user.target
