@@ -33,7 +33,7 @@ def viewport(source, target):
 def run(config, state, *, windowed=False, demo=None, frames=None):
     os.environ.setdefault("PYGAME_HIDE_SUPPORT_PROMPT", "1")
     if not windowed:
-        os.environ.setdefault("SDL_VIDEODRIVER", "kmsdrm")
+        os.environ.setdefault("SDL_VIDEODRIVER", "KMSDRM")
     import pygame
 
     pygame.display.init()

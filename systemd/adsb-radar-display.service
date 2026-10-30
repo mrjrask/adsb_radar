@@ -13,7 +13,7 @@ Group=adsb-radar
 SupplementaryGroups=video render input tty
 WorkingDirectory=/opt/adsb-radar
 Environment=PYGAME_HIDE_SUPPORT_PROMPT=1
-Environment=SDL_VIDEODRIVER=kmsdrm
+Environment=SDL_VIDEODRIVER=KMSDRM
 Environment=SDL_AUDIODRIVER=dummy
 Environment=ADSB_RADAR_ASSETS=/var/lib/adsb-radar/images
 Environment=PYTHONDONTWRITEBYTECODE=1

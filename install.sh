@@ -55,7 +55,7 @@ python3 - <<'PY'
 import ctypes
 library = ctypes.CDLL('libSDL2-2.0.so.0')
 library.SDL_GetVideoDriver.restype = ctypes.c_char_p
-drivers = [library.SDL_GetVideoDriver(i).decode() for i in range(library.SDL_GetNumVideoDrivers())]
+drivers = [library.SDL_GetVideoDriver(i).decode().lower() for i in range(library.SDL_GetNumVideoDrivers())]
 if 'kmsdrm' not in drivers:
     raise SystemExit('The system SDL2 has no kmsdrm backend. Install a KMS-enabled Raspberry Pi OS build.')
 print('System SDL2 has the KMS/DRM backend.')
