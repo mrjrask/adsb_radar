@@ -1,6 +1,6 @@
 # Desktop development. On the Pi, install.sh uses Debian's packaged builds,
 # especially python3-pygame linked to SDL2 with KMS/DRM support.
-Pillow>=10,<14
+Pillow>=13.0.0,<14
 pygame>=2.6,<3
 Flask>=3,<4
 gunicorn>=23,<24
