@@ -59,11 +59,12 @@ def parse_aircraft(payload, source, home, unit="nm", now=None):
         code = code if re.fullmatch(r"[A-Z0-9]{1,8}", code) else None
         callsign = str(entry.get("flight", "")).strip().upper()[:16] or None
         rate = number(entry.get("baro_rate", entry.get("geom_rate")))
+        category = str(entry.get("category", "")).upper().strip()
         result.append(LiveAircraft(
             hex_id, callsign, code, lat, lon, int(altitude) if altitude is not None else None,
             number(entry.get("track")), number(entry.get("gs")), int(rate) if rate is not None else None,
             now - seen - age, source, haversine_distance(*home, lat, lon, unit=unit),
-            initial_bearing(*home, lat, lon)))
+            initial_bearing(*home, lat, lon), category if re.fullmatch(r"[A-D][0-7]", category) else None))
     return tuple(result)
 
 
