@@ -13,7 +13,7 @@ from pathlib import Path
 
 import requests
 
-from . import flight_routes
+from . import codeshares, flight_routes
 
 LOG = logging.getLogger(__name__)
 TYPE_URL = "https://raw.githubusercontent.com/wiedehopf/tar1090-db/csv/aircraft.csv.gz"
@@ -52,6 +52,14 @@ class Metadata:
         route = flight_routes.FlightRoute.from_json(row[0])
         return flight_routes.fitting_route(route, aircraft.latitude, aircraft.longitude, aircraft.altitude_ft) if route else None
 
+    def _fetch_route(self, callsign):
+        """``(answered, route)`` from adsbdb; ``(True, None)`` for an unknown callsign."""
+
+        with requests.get(ROUTE_URL.format(callsign), timeout=(3, 4), allow_redirects=False) as response:
+            if response.status_code not in (200, 404):
+                return False, None
+            return True, flight_routes.parse_adsbdb(response.json(), callsign) if response.status_code == 200 else None
+
     def update_route(self, plane):
         if not flight_routes.is_flight_callsign(plane.callsign):
             return
@@ -60,16 +68,48 @@ class Metadata:
         if row and time.time() - row[1] < (86400 if row[0] else 3600):
             return
         try:
-            with requests.get(ROUTE_URL.format(plane.callsign), timeout=(3, 4), allow_redirects=False) as response:
-                if response.status_code not in (200, 404):
-                    return
-                route = flight_routes.parse_adsbdb(response.json(), plane.callsign) if response.status_code == 200 else None
+            answered, route = self._fetch_route(plane.callsign)
+            if not answered:
+                return
+            route = self._with_codeshare(plane, route)
             with self.connect() as connection:
                 connection.execute("INSERT OR REPLACE INTO routes VALUES (?,?,?)",
                                    (plane.callsign, route.to_json() if route else None, time.time()))
                 connection.commit()
         except (requests.RequestException, ValueError):
             LOG.info("Route lookup unavailable; continuing with receiver data")
+
+    def _with_codeshare(self, plane, route):
+        """*route* with the marketed flight it is sold as, or a codeshare's route when *route* is no use.
+
+        A regional flight (SKW5432) is sold under a major airline's number
+        (UAL5432). The first codeshare whose route this aircraft can be flying,
+        and that agrees with its own route when it has one, is recorded; the
+        airline stays the operator's.
+        """
+
+        def leg(candidate):
+            if candidate is None:
+                return None
+            return flight_routes.fitting_route(candidate, plane.latitude, plane.longitude, plane.altitude_ft)
+
+        def ends(candidate):
+            return (candidate.origin.code if candidate.origin else "",
+                    candidate.destination.code if candidate.destination else "")
+
+        own = leg(route)
+        for partner in codeshares.codeshare_callsigns(plane.callsign):
+            answered, other = self._fetch_route(partner)
+            if not answered:
+                break
+            shared = leg(other)
+            if shared is None or (own is not None and ends(own) != ends(shared)):
+                continue
+            if own is not None:
+                return replace(route, codeshares=(partner,))
+            return replace(other, callsign=plane.callsign, airline_name="", airline_icao=plane.callsign[:3],
+                           airline_iata="", codeshares=(partner,))
+        return route
 
     def update_types(self):
         with self.connect() as connection:
