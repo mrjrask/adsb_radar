@@ -26,8 +26,11 @@ clocks and numerical readouts use **JetBrains Mono**; descriptive text uses
 When a plane enters your flight radius, its airline, type, artwork, route
 (when available), altitude, speed, distance, and local traffic appear. With
 nothing overhead, choose radar, clock, clear-skies message, blank, or a
-rotation of idle views. The radar has a sweep, moving aircraft, trails,
-altitude colors, and beacon/strobe lights. Optional visibility cutoffs filter
+rotation of idle views. The radar has a sweep, moving aircraft drawn as
+top-down silhouettes of their type, trails, altitude colors, and navigation,
+strobe and beacon lights where real aircraft carry them. Its list shows each
+nearby flight's airline logo and route. The flight board's sky map uses the
+same radar style. Optional visibility cutoffs filter
 planes hidden by trees or buildings.
 
 ## Install

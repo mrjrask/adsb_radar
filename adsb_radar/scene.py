@@ -1,14 +1,11 @@
 """Native-resolution radar animation, idle screens and the flight board."""
 
-import math
 import time
 from datetime import datetime
 
 from PIL import Image, ImageDraw
 
-from . import airline_directory, flight_layout, fonts
-from .forms import RADAR_COLOR_DEFAULTS
-from .models import advance
+from . import airline_directory, flight_layout, fonts, radar
 from .sky_cone import Cone
 
 
@@ -30,10 +27,6 @@ def select_flight(aircraft, settings, metadata, keep=None):
     return flight_layout.OverheadFlight(plane, route, airline, len(eligible), tuple(aircraft))
 
 
-def rgb(text):
-    return tuple(int(text[i:i + 2], 16) for i in (1, 3, 5))
-
-
 class Scene:
     def __init__(self, size):
         self.size = size
@@ -42,6 +35,9 @@ class Scene:
         self.flight_key = None
         self.flight_image = None
         self.keep = None
+        self.flight_box = None
+        self.routes = {}
+        self.list_key = self.list_image = self.list_box = None
 
     def text(self, draw, position, text, size, color=(225, 235, 240), bold=False, anchor=None, role=None):
         # Projector labels stay at least 12px high rather than shrinking in
@@ -50,15 +46,47 @@ class Scene:
         draw.text(position, text, font=fonts.load(role or ("heading" if bold else "body"), size, bold),
                   fill=color, anchor=anchor)
 
-    def radar(self, aircraft, settings, now, health):
+    def route(self, plane, metadata, now):
+        """The cached route for *plane*; the database is read at most every few seconds per callsign."""
+
+        if metadata is None or not plane.callsign:
+            return None
+        hit = self.routes.get(plane.callsign)
+        if hit is None or now - hit[0] > 10:
+            if len(self.routes) > 300:
+                self.routes.clear()
+            hit = self.routes[plane.callsign] = (now, metadata.route(plane))
+        return hit[1]
+
+    def altitude_key(self, image, left, top, width, colors, scale):
+        """A segmented altitude bar with the band boundaries marked underneath."""
+
+        draw = ImageDraw.Draw(image)
+        muted = (150, 165, 175)
+        self.text(draw, (left, top), "ALTITUDE (FT)", 17 * scale, muted)
+        bar_top = top + max(22, 34 * scale)
+        bar_h = max(6, round(12 * scale))
+        gap = max(2, round(4 * scale))
+        segment = (width - gap * 4) / 5
+        for index in range(5):
+            x0 = left + index * (segment + gap)
+            draw.rounded_rectangle((x0, bar_top, x0 + segment, bar_top + bar_h), radius=bar_h / 2,
+                                   fill=colors[f"RADAR_ALT_{index + 1}"])
+        for index, label in enumerate(("4k", "10k", "20k", "30k"), 1):
+            x = left + index * (segment + gap) - gap / 2
+            self.text(draw, (x, bar_top + bar_h + max(4, 6 * scale)), label, 17 * scale, muted, anchor="mt",
+                      role="mono")
+
+    def radar(self, aircraft, settings, now, metadata=None):
         width, height = self.size
         scale = min(width / 1920, height / 1080)
-        colors = {key: rgb(settings.get(key) or value) for key, value in RADAR_COLOR_DEFAULTS.items()}
+        colors = radar.colors_for(settings)
         radius = settings["RADIUS"]
         reach = max(radius, settings.get("RADAR_RANGE") or radius * 4)
         unit = settings["DISTANCE_UNIT"]
         side = min(height * 0.86, width * 0.57)
         cx, cy, outer = width * 0.30, height * 0.51, side / 2
+        line = max(1, 2 * scale)
         key = (self.size, tuple(colors.items()), radius, reach, unit)
         if key != self.background_key:
             self.background_key = key
@@ -66,72 +94,73 @@ class Scene:
             draw = ImageDraw.Draw(background)
             self.text(draw, (40 * scale, 24 * scale), "ADS-B RADAR", 36 * scale,
                       colors["RADAR_COUNT"], bold=True)
-            for factor in (0.25, 0.5, 0.75, 1):
-                r = outer * factor
-                draw.ellipse((cx - r, cy - r, cx + r, cy + r),
-                             outline=colors["RADAR_RING" if factor == 1 else "RADAR_RING_DIM"], width=max(1, round(2 * scale)))
-            r = outer * radius / reach
-            draw.ellipse((cx - r, cy - r, cx + r, cy + r), outline=colors["RADAR_HOME_RING"], width=max(1, round(2 * scale)))
-            draw.line((cx - outer, cy, cx + outer, cy), fill=colors["RADAR_RING_DIM"])
-            draw.line((cx, cy - outer, cx, cy + outer), fill=colors["RADAR_RING_DIM"])
-            draw.ellipse((cx - 4 * scale, cy - 4 * scale, cx + 4 * scale, cy + 4 * scale), fill=colors["RADAR_NORTH"])
+            radar.draw_scope(background, cx, cy, outer, colors, radius=radius, reach=reach, line=line)
             self.text(draw, (cx, cy - outer - 12 * scale), "N", 28 * scale, colors["RADAR_NORTH"], anchor="mb")
             self.text(draw, (cx, cy + outer + 16 * scale), f"{reach:g} {unit}", 28 * scale,
                       colors["RADAR_RANGE_COLOR"], anchor="mt")
+            left = width * 0.62
+            self.altitude_key(background, left, height * 0.83,
+                              min(width - 40 * scale - left, max(280, 460 * scale)), colors, scale)
             self.background = background
         image = self.background.copy()
         draw = ImageDraw.Draw(image)
         if settings.get("RADAR_SWEEP", True) is not False:
-            angle = now % 3.6 / 3.6 * math.tau
-            sweep, base = colors["RADAR_SWEEP_COLOR"], colors["RADAR_BACKGROUND"]
-            for step in range(32, -1, -1):
-                theta = angle - step * 0.014
-                amount = (1 - step / 34) * 0.7
-                color = tuple(round(base[i] * (1 - amount) + sweep[i] * amount) for i in range(3))
-                draw.line((cx, cy, cx + math.sin(theta) * outer, cy - math.cos(theta) * outer),
-                          fill=color, width=max(1, round(2 * scale)))
-        moving = settings.get("RADAR_MOTION", True) is not False
-        planes = [advance(a, now, unit=unit) if moving else a for a in aircraft]
-        planes = sorted((a for a in planes if a.distance <= reach), key=lambda a: a.distance)
-        for plane in reversed(planes):
-            r, b = plane.distance / reach * outer, math.radians(plane.bearing)
-            x, y = cx + r * math.sin(b), cy - r * math.cos(b)
-            altitude = plane.altitude_ft or 0
-            band = next((i for i, ceiling in enumerate((4000, 10000, 20000, 30000), 1) if altitude < ceiling), 5)
-            color = colors[f"RADAR_ALT_{band}"]
-            heading = math.radians(plane.track or 0)
-            trail = settings.get("RADAR_TRAIL")
-            trail = 6 if trail is None else trail
-            if trail:
-                end = x - math.sin(heading) * trail * 4 * scale, y + math.cos(heading) * trail * 4 * scale
-                draw.line((x, y, *end), fill=tuple(c // 3 for c in color), width=max(1, round(2 * scale)))
-            draw.polygon(flight_layout._plane_points(x, y, max(5, 22 * scale), plane.track or 0), fill=color)
-            if settings.get("RADAR_LIGHTS", True) is not False:
-                phase = (now + int(plane.hex.lstrip("~"), 16) % 31 / 31) % 1.6
-                light = (255, 70, 70) if phase < 0.1 else (255, 255, 255) if 0.5 < phase < 0.56 or 0.65 < phase < 0.71 else None
-                if light:
-                    dot = max(1, round(2 * scale))
-                    draw.ellipse((x - dot, y - dot, x + dot, y + dot), fill=light)
+            radar.draw_sweep(image, cx, cy, outer, now, colors, line)
+        radar.draw_home(image, cx, cy, colors, 4 * scale)
+        planes = radar.in_motion(aircraft, settings, now, unit)
+        planes = sorted((a for a in planes if a.distance is not None and a.distance <= reach), key=lambda a: a.distance)
+        radar.draw_traffic(image, planes, cx=cx, cy=cy, outer=outer, reach=reach, colors=colors, settings=settings,
+                           now=now, icon=max(18, 30 * scale), trail_step=4 * scale)
         left = width * 0.62
         self.text(draw, (left, height * 0.08), datetime.fromtimestamp(now).strftime(
             "%H:%M:%S" if settings.get("CLOCK_24H") else "%I:%M:%S %p").lstrip("0"), 58 * scale, colors["RADAR_COUNT"], role="mono")
-        self.text(draw, (left, height * 0.17), f"{len(planes)} aircraft · {reach:g} {unit}", 27 * scale, colors["RADAR_COUNT"])
-        self.text(draw, (left, height * 0.23), health, 20 * scale, (160, 180, 175))
         rows = 5 if height <= 600 else 7 if height <= 1080 else 10
-        for index, plane in enumerate(planes[:rows]):
-            spacing = height * 0.48 / rows
-            y = height * 0.32 + index * spacing
-            self.text(draw, (left, y), plane.callsign or plane.hex.upper(), 25 * scale, bold=True)
-            self.text(draw, (left, y + max(16, 30 * scale)),
-                      f"{plane.altitude_ft:,} ft · {plane.distance:.1f} {unit}" if plane.altitude_ft is not None
-                      else f"Altitude unknown · {plane.distance:.1f} {unit}", 19 * scale, (150, 165, 175), role="mono")
-        for index, label in enumerate(("<4k", "4–10k", "10–20k", "20–30k", "30k+ ft"), 1):
-            self.text(draw, (left + ((index - 1) % 3) * 160 * scale,
-                             height * 0.82 + ((index - 1) // 3) * 40 * scale), label, 19 * scale,
-                      colors[f"RADAR_ALT_{index}"])
+        listed = []
+        for plane in planes[:rows]:
+            route = self.route(plane, metadata, now)
+            code = route.airline_icao if route and route.airline_icao else airline_directory.airline_code(plane.callsign)
+            airline = airline_directory.airline_for(code, name=route.airline_name if route else "",
+                                                  iata=route.airline_iata if route else "")
+            listed.append((airline, plane.callsign or plane.hex.upper(),
+                           f"{route.origin.code} → {route.destination.code}" if route and route.origin and route.destination
+                           else "",
+                           f"{plane.altitude_ft:,} ft · {plane.distance:.1f} {unit}" if plane.altitude_ft is not None
+                           else f"Altitude unknown · {plane.distance:.1f} {unit}"))
+        # Text is the slow part of a frame, so the list is redrawn only when a line changes.
+        key = (self.background_key, len(planes), tuple(listed))
+        if key != self.list_key:
+            self.list_key = key
+            box = (round(left), round(height * 0.15), width, round(height * 0.81))
+            panel = self.background.crop(box)
+            self.aircraft_list(panel, -box[0], -box[1], listed, len(planes), reach, unit, colors, scale)
+            self.list_image, self.list_box = panel, box
+        image.paste(self.list_image, self.list_box[:2])
         return image
 
-    def render(self, aircraft, settings, metadata=None, *, online=True, now=None, health="Receivers online"):
+    def aircraft_list(self, image, dx, dy, listed, count, reach, unit, colors, scale):
+        """The aircraft count and the nearest flights (logo, callsign, route, altitude and distance)."""
+
+        width, height = self.size
+        draw = ImageDraw.Draw(image)
+        left = width * 0.62 + dx
+        self.text(draw, (left, height * 0.17 + dy), f"{count} aircraft · {reach:g} {unit}", 27 * scale,
+                  colors["RADAR_COUNT"])
+        rows = 5 if height <= 600 else 7 if height <= 1080 else 10
+        spacing = height * 0.53 / rows
+        tile = round(spacing * 0.78)
+        name_size = max(16, round(25 * scale))
+        for index, (airline, name, route, detail) in enumerate(listed):
+            y = height * 0.26 + index * spacing + dy
+            badge = flight_layout.logo_tile(airline, tile)
+            image.paste(badge, (round(left), round(y)), badge)
+            x = left + tile + max(8, 14 * scale)
+            self.text(draw, (x, y), name, name_size, bold=True)
+            if route:
+                after = x + draw.textlength(name, font=fonts.load("heading", name_size, True)) + max(8, 14 * scale)
+                self.text(draw, (after, y + name_size * 0.1), route, 21 * scale, colors["RADAR_COUNT"])
+            self.text(draw, (x, y + max(18, 32 * scale)), detail, 19 * scale, (150, 165, 175), role="mono")
+
+    def render(self, aircraft, settings, metadata=None, *, online=True, now=None):
         now = time.time() if now is None else now
         home = settings["LATITUDE"], settings["LONGITUDE"]
         # Age out old positions even if a poll is delayed or the receiver goes away.
@@ -139,19 +168,30 @@ class Scene:
         flight = select_flight(aircraft, settings, metadata, self.keep) if online else None
         self.keep = flight.aircraft.hex if flight else None
         if flight:
-            key = (flight, home, settings["DISTANCE_UNIT"], settings["RADIUS"], settings["RADAR_RANGE"])
+            colors = radar.colors_for(settings)
+            key = (flight, home, settings["DISTANCE_UNIT"], settings["RADIUS"], settings["RADAR_RANGE"],
+                   tuple(colors.items()))
             if key != self.flight_key:
                 self.flight_key = key
+                # The board is drawn once per update; the sky map's sweep, planes and lights every frame.
                 self.flight_image = flight_layout.compose_overhead_image(
                     flight, width=self.size[0], height=self.size[1], home=home,
-                    unit=settings["DISTANCE_UNIT"], radius=settings["RADIUS"], radar_range=settings["RADAR_RANGE"])
-            return self.flight_image
+                    unit=settings["DISTANCE_UNIT"], radius=settings["RADIUS"], radar_range=settings["RADAR_RANGE"],
+                    settings=settings, traffic=False)
+                self.flight_box = flight_layout.radar_box(*self.size)
+            if self.flight_box is None:
+                return self.flight_image
+            image = self.flight_image.copy()
+            flight_layout.draw_sky_traffic(image, self.flight_box, flight, settings, now,
+                                           radius=settings["RADIUS"], unit=settings["DISTANCE_UNIT"],
+                                           reach=settings["RADAR_RANGE"])
+            return image
         modes = (settings.get("IDLE") or "radar").split(",")
         mode = modes[int(now // (settings.get("IDLE_SECONDS") or 30)) % len(modes)]
         if not online:
             mode = "clock"
         if mode == "radar":
-            return self.radar(aircraft, settings, now, health)
+            return self.radar(aircraft, settings, now, metadata)
         image = Image.new("RGB", self.size)
         draw = ImageDraw.Draw(image)
         width, height = self.size

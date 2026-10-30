@@ -8,6 +8,7 @@ from __future__ import annotations
 import logging
 import math
 import os
+import time
 from dataclasses import dataclass, field
 from functools import lru_cache
 from pathlib import Path
@@ -15,7 +16,7 @@ from typing import Any, Optional
 
 from PIL import Image, ImageDraw, ImageFont
 
-from . import aircraft_art, airline_directory, flight_routes, fonts
+from . import aircraft_art, airline_directory, flight_routes, fonts, radar
 from .models import LiveAircraft, haversine_distance
 
 LANCZOS = Image.Resampling.LANCZOS
@@ -29,9 +30,6 @@ LABEL = (118, 132, 150)
 FAINT = (52, 64, 80)
 CARD = (13, 19, 27)
 CARD_EDGE = (30, 41, 55)
-RADAR_FILL = (8, 14, 22)
-RADAR_RING = (36, 52, 70)
-TRAFFIC = (96, 112, 130)
 TILE = (246, 247, 249)
 CLIMB = (95, 220, 150)
 DESCEND = (255, 150, 80)
@@ -236,15 +234,20 @@ class _Smooth:
 # ── Logos ───────────────────────────────────────────────────────────────────
 
 
+@lru_cache(maxsize=4)
+def _logo_index(directory: str, mtime: float) -> dict[str, str]:
+    return {name.lower(): os.path.join(directory, name) for name in os.listdir(directory)}
+
+
 def _logo_path(icao: str) -> Optional[str]:
     directory = str(ASSET_DIR / "air")
-    if not icao or not directory or not os.path.isdir(directory):
+    if not icao:
         return None
-    wanted = {f"{icao}{ext}".lower() for ext in _LOGO_EXTENSIONS}
-    for name in os.listdir(directory):
-        if name.lower() in wanted:
-            return os.path.join(directory, name)
-    return None
+    try:
+        index = _logo_index(directory, os.path.getmtime(directory))
+    except OSError:
+        return None
+    return next((index[f"{icao}{ext}".lower()] for ext in _LOGO_EXTENSIONS if f"{icao}{ext}".lower() in index), None)
 
 
 @lru_cache(maxsize=64)
@@ -274,29 +277,48 @@ def airline_logo(icao: Optional[str], box: int) -> Optional[Image.Image]:
     return _load_logo(path, mtime, int(box))
 
 
-def _draw_logo_tile(image: Image.Image, x: int, y: int, size: int, flight: OverheadFlight) -> None:
-    """White rounded tile with the airline's logo, or a brand-colour badge."""
-
-    draw = ImageDraw.Draw(image)
-    airline = flight.airline
+@lru_cache(maxsize=256)
+def _logo_tile(airline: Optional[airline_directory.Airline], size: int, logo_mtime: Optional[float]) -> Image.Image:
+    tile = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(tile)
     icao = airline.icao if airline else ""
     padding = max(2, round(size * 0.13))
     logo = airline_logo(icao, size - 2 * padding) if icao else None
     radius = max(2, round(size * 0.22))
     if logo is not None:
-        draw.rounded_rectangle((x, y, x + size - 1, y + size - 1), radius=radius, fill=TILE)
-        image.paste(logo, (x + (size - logo.width) // 2, y + (size - logo.height) // 2), logo)
-        return
+        draw.rounded_rectangle((0, 0, size - 1, size - 1), radius=radius, fill=TILE + (255,))
+        tile.alpha_composite(logo, ((size - logo.width) // 2, (size - logo.height) // 2))
+        return tile
     color = (airline.color if airline and airline.color else None) or FALLBACK_BADGE
-    smooth = _Smooth(image, (x, y, x + size, y + size))
-    smooth.ellipse(x + size / 2, y + size / 2, size / 2, fill=color + (255,))
+    smooth = _Smooth(tile, (0, 0, size, size))
+    smooth.ellipse(size / 2, size / 2, size / 2, fill=color + (255,))
     code = (airline.iata or airline.icao) if airline else ""
     if not code:
-        smooth.polygon(_plane_points(x + size / 2, y + size / 2, size * 0.56, 45), fill=(255, 255, 255, 255))
-    smooth.paste()
+        smooth.polygon(_plane_points(size / 2, size / 2, size * 0.56, 45), fill=(255, 255, 255, 255))
+    small = smooth.layer.resize((smooth.width, smooth.height), LANCZOS)
+    tile.alpha_composite(small)
     if code:
         font, text = _fit(draw, code, size * 0.3, round(size * 0.74), bold=True)
-        draw.text((x + size / 2, y + size / 2), text, font=font, fill=_contrast_text(color), anchor="mm")
+        draw.text((size / 2, size / 2), text, font=font, fill=_contrast_text(color), anchor="mm")
+    return tile
+
+
+def logo_tile(airline: Optional[airline_directory.Airline], size: int) -> Image.Image:
+    """A *size* square RGBA tile: the airline's logo on white, else a brand-colour badge."""
+
+    path = _logo_path(airline.icao) if airline and airline.icao else None
+    try:
+        mtime = os.path.getmtime(path) if path else None
+    except OSError:
+        mtime = None
+    return _logo_tile(airline, int(size), mtime)
+
+
+def _draw_logo_tile(image: Image.Image, x: int, y: int, size: int, flight: OverheadFlight) -> None:
+    """White rounded tile with the airline's logo, or a brand-colour badge."""
+
+    tile = logo_tile(flight.airline, size)
+    image.paste(tile, (x, y), tile)
 
 
 # ── Pieces ──────────────────────────────────────────────────────────────────
@@ -577,61 +599,51 @@ def _draw_cards(image: Image.Image, box, flight: OverheadFlight, unit: str, *, v
         draw.text((x, value_base), text, font=value_font, fill=TEXT, anchor="ls")
 
 
-def _draw_radar(image: Image.Image, box, flight: Optional[OverheadFlight], traffic, radius: float, unit: str,
-                accent, home=None, reach=None) -> None:
-    """A sky map centred on the display: a map, range rings, traffic, the overhead flight."""
+def _sky_geometry(box, radius: float, reach: Optional[float]):
+    """(cx, cy, outer, size, reach, line) of the sky map in *box*."""
 
     left, top, right, bottom = box
     size = min(right - left, bottom - top)
-    cx, cy = (left + right) / 2, (top + bottom) / 2
+    label_cap = max(5.0, size * 0.035)
+    reach = max(radius, reach) if reach else radius * RADAR_RANGE_FACTOR
+    return (left + right) / 2, (top + bottom) / 2, size / 2 - label_cap * 1.8, size, reach, max(1.0, size / 260)
+
+
+def _draw_radar(image: Image.Image, box, radius: float, unit: str, reach=None, settings=None) -> None:
+    """The sky map's scope, styled like the radar screen: filled disc, range rings, flight-radius ring."""
+
+    cx, cy, outer, size, reach, line = _sky_geometry(box, radius, reach)
+    colors = radar.colors_for(settings)
+    radar.draw_scope(image, cx, cy, outer, colors, radius=radius, reach=reach, line=line, fill=True)
     draw = ImageDraw.Draw(image)
     label_cap = max(5.0, size * 0.035)
-    outer = size / 2 - label_cap * 1.8
-    reach = max(radius, reach) if reach is not None else radius * RADAR_RANGE_FACTOR
-    smooth = _Smooth(image, (cx - size / 2, cy - size / 2, cx + size / 2, cy + size / 2))
-    line = max(1.0, size / 260)
-    smooth.ellipse(cx, cy, outer, fill=RADAR_FILL + (255,))
-    smooth.ellipse(cx, cy, outer, outline=RADAR_RING + (255,), width=line)
-    smooth.ellipse(cx, cy, outer * radius / reach, outline=RADAR_RING + (255,), width=line)
-    smooth.line([(cx - outer, cy), (cx + outer, cy)], fill=RADAR_RING + (150,), width=line * 0.7)
-    smooth.line([(cx, cy - outer), (cx, cy + outer)], fill=RADAR_RING + (150,), width=line * 0.7)
-
-    def place(aircraft: LiveAircraft) -> Optional[tuple[float, float]]:
-        if aircraft.distance is None or aircraft.bearing is None:
-            return None
-        r = min(1.0, aircraft.distance / reach) * outer
-        b = math.radians(aircraft.bearing)
-        return cx + r * math.sin(b), cy - r * math.cos(b)
-
-    small = max(5.0, size * 0.06)
-    focus = flight.aircraft if flight is not None else None
-    for aircraft in reversed(traffic):
-        if focus is not None and aircraft.hex == focus.hex:
-            continue
-        spot = place(aircraft)
-        if spot is None:
-            continue
-        if aircraft.track is None:
-            smooth.ellipse(*spot, small * 0.2, fill=TRAFFIC + (255,))
-        else:
-            smooth.polygon(_plane_points(*spot, small, aircraft.track), fill=TRAFFIC + (255,))
-    smooth.ellipse(cx, cy, max(2.0, size * 0.018), fill=TEXT + (255,))
-    smooth.ellipse(cx, cy, max(3.5, size * 0.035), outline=TEXT + (120,), width=line)
-    if focus is not None:
-        spot = place(focus)
-        if spot is not None:
-            smooth.line([(cx, cy), spot], fill=accent + (110,), width=line)
-            big = max(9.0, size * 0.13)
-            smooth.ellipse(*spot, big * 0.62, fill=accent + (45,))
-            smooth.polygon(_plane_points(*spot, big, focus.track if focus.track is not None else 0),
-                           fill=accent + (255,))
-    smooth.paste()
-
     font = _font(max(6, round(label_cap / 0.73)), True)
-    draw.text((round(cx), round(cy - outer - label_cap * 0.5)), "N", font=font, fill=LABEL, anchor="ms")
-    ring_font = _font(max(6, round(label_cap * 0.85 / 0.73)))
-    draw.text((round(cx), round(cy + outer + label_cap * 1.4)), f"{reach:g} {unit}", font=ring_font, fill=LABEL,
+    draw.text((round(cx), round(cy - outer - label_cap * 0.5)), "N", font=font, fill=colors["RADAR_NORTH"],
               anchor="ms")
+    ring_font = _font(max(6, round(label_cap * 0.85 / 0.73)))
+    draw.text((round(cx), round(cy + outer + label_cap * 1.4)), f"{reach:g} {unit}", font=ring_font,
+              fill=colors["RADAR_RANGE_COLOR"], anchor="ms")
+
+
+def draw_sky_traffic(image: Image.Image, box, flight: OverheadFlight, settings, now: float, *, radius: float,
+                     unit: str, reach=None) -> None:
+    """The sky map's sweep and traffic for one frame; the overhead flight is larger and ringed in its accent."""
+
+    cx, cy, outer, size, reach, line = _sky_geometry(box, radius, reach)
+    colors = radar.colors_for(settings)
+    if (settings or {}).get("RADAR_SWEEP", True) is not False:
+        radar.draw_sweep(image, cx, cy, outer, now, colors, line)
+    radar.draw_home(image, cx, cy, colors, size * 0.012)
+    planes = radar.in_motion(flight.traffic or (flight.aircraft,), settings, now, unit)
+    radar.draw_traffic(image, planes, cx=cx, cy=cy, outer=outer, reach=reach, colors=colors, settings=settings,
+                       now=now, icon=max(12.0, size * 0.07), trail_step=size / 230, focus=flight.aircraft.hex,
+                       accent=accent_color(flight.airline))
+
+
+def radar_box(width: int, height: int):
+    """Where the flight board's sky map sits, or None when the layout has none."""
+
+    return _layout(width, height).get("radar")
 
 
 # ── Composition ─────────────────────────────────────────────────────────────
@@ -699,7 +711,8 @@ def _wash(image: Image.Image, accent, depth: float) -> None:
     image.paste(gradient.resize((width, rows)), (0, 0))
 
 
-def _compose_flight(image: Image.Image, flight: OverheadFlight, home, unit: str, radius: float, radar_range=None) -> None:
+def _compose_flight(image: Image.Image, flight: OverheadFlight, home, unit: str, radius: float, radar_range=None,
+                    settings=None, traffic: bool = True, now: Optional[float] = None) -> None:
     width, height = image.size
     accent = accent_color(flight.airline)
     boxes = _layout(width, height)
@@ -716,8 +729,10 @@ def _compose_flight(image: Image.Image, flight: OverheadFlight, home, unit: str,
         _text_line(draw, margin, height - margin, stats, max(5, height * 0.05), width - 2 * margin, SECONDARY,
                    minimum=6)
     if "radar" in boxes:
-        _draw_radar(image, boxes["radar"], flight, flight.traffic or (flight.aircraft,), radius, unit, accent,
-                    home, reach=radar_range)
+        _draw_radar(image, boxes["radar"], radius, unit, radar_range, settings)
+        if traffic:
+            draw_sky_traffic(image, boxes["radar"], flight, settings, time.time() if now is None else now,
+                             radius=radius, unit=unit, reach=radar_range)
     if "aircraft" in boxes:
         _draw_aircraft(image, boxes["aircraft"], flight)
 
@@ -751,13 +766,19 @@ def compose_overhead_image(
     unit: Optional[str] = None,
     radius: Optional[float] = None,
     radar_range: Optional[float] = None,
+    settings: Optional[dict] = None,
+    traffic: bool = True,
+    now: Optional[float] = None,
 ) -> Image.Image:
-    """The flight board for *flight*. Idle screens (radar, clock, clear skies) are drawn by scene.py."""
+    """The flight board for *flight*. Idle screens (radar, clock, clear skies) are drawn by scene.py.
+
+    *settings* supplies the radar colours and controls. With *traffic* off the sky map is left empty
+    for ``draw_sky_traffic`` to animate each frame."""
 
     width = int(width or 1920)
     height = int(height or 1080)
     unit = unit or "nm"
     radius = 3.0 if radius is None else radius
     image = Image.new("RGB", (width, height), BACKGROUND)
-    _compose_flight(image, flight, home, unit, radius, radar_range)
+    _compose_flight(image, flight, home, unit, radius, radar_range, settings, traffic, now)
     return image

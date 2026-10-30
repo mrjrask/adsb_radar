@@ -98,7 +98,10 @@ def run(config, state, *, windowed=False, demo=None, frames=None, output=None):
                     stats.update({k: v for k, v in result.items() if k != "aircraft"})
                     stats["polls"] += 1
                     if result["healthy_receivers"]:
-                        aircraft = result["aircraft"]
+                        # Look up cached types before this poll is drawn, so the flight board never
+                        # shows the generic aircraft for a frame while the type is still unknown.
+                        aircraft = metadata.enrich(result["aircraft"])
+                        next_metadata = monotonic + 1
                         stats["last_success"] = now
                         online = True
                         worker.submit(aircraft)
@@ -110,8 +113,7 @@ def run(config, state, *, windowed=False, demo=None, frames=None, output=None):
             if metadata and monotonic >= next_metadata:
                 aircraft = metadata.enrich(aircraft)
                 next_metadata = monotonic + 1
-            image = scene.render(aircraft, settings, metadata, online=online, now=now,
-                                 health="Demo feed" if demo else f'{stats["healthy_receivers"]}/{len(config["RECEIVER_URLS"])} feeds online')
+            image = scene.render(aircraft, settings, metadata, online=online, now=now)
             level = settings.get("BRIGHTNESS") or 1.0
             out.present(image, config["ROTATION"], level)
             if monotonic >= next_snapshot:

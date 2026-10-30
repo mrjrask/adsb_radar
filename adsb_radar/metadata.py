@@ -117,7 +117,8 @@ class MetadataWorker(threading.Thread):
             self.pending.get_nowait()
         except queue.Empty:
             pass
-        self.pending.put_nowait(aircraft[:3])
+        # The nearest planes: the flight board's and the radar list's (up to 10 rows at 4K).
+        self.pending.put_nowait(aircraft[:10])
 
     def run(self):
         if self.config["TYPE_LOOKUP"]:

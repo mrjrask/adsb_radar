@@ -21,6 +21,8 @@ class LiveAircraft:
     device: str
     distance: float | None = None
     bearing: float | None = None
+    # ADS-B emitter category (A1 light ... A5 heavy, A7 rotorcraft), when the receiver reports it.
+    category: str | None = None
 
 
 def haversine_distance(lat1, lon1, lat2, lon2, *, unit="nm"):

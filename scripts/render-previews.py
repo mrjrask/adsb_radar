@@ -38,7 +38,7 @@ def main():
     for profile, size in PROFILES.items():
         scene = Scene(size)
         for mode, planes in (("flight", (focus, *traffic)), ("radar", traffic)):
-            image = scene.render(planes, config, DemoRoutes(), now=now, health="2/2 receivers online")
+            image = scene.render(planes, config, DemoRoutes(), now=now)
             image.save(args.output / f"{profile}-{mode}.png")
             print(f"{profile}-{mode}: {image.width}×{image.height}")
 

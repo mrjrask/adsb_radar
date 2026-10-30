@@ -98,3 +98,25 @@ def test_motion_and_aspect_preserving_scaling(plane):
     assert advance(plane, plane.seen_at + 100).distance == advance(plane, plane.seen_at + 15).distance
     assert viewport((1920, 1080), (1920, 1200)) == (0, 60, 1920, 1080)
     assert viewport((1080, 1920), (1920, 1080)) == (656, 0, 608, 1080)
+
+
+def test_radar_icons_follow_type_and_skip_planes_beyond_range(plane):
+    from adsb_radar import radar
+
+    assert radar.view_for("A388") is radar.A380
+    assert radar.view_for("CRJ9") is radar.TAILJET
+    assert radar.view_for("C172") is radar.LIGHT_PROP
+    assert radar.view_for("EC35") is radar.HELICOPTER
+    assert radar.view_for(None, "A5") is radar.WIDEBODY
+    assert radar.icon_mask(radar.A380, 40, 0).getbbox() is not None
+    # Out-of-range traffic is left off the scope rather than stacked on the rim.
+    assert radar.position(replace(plane, distance=30), 100, 100, 80, 12) is None
+    assert radar.position(replace(plane, distance=6), 100, 100, 80, 12) is not None
+
+
+def test_flight_board_sky_map_animates(config, plane, distant):
+    scene = Scene((1920, 1080))
+    stamp = time.time()
+    first = scene.render((plane, distant), config, now=stamp)
+    second = scene.render((plane, distant), config, now=stamp + 0.9)
+    assert scene.keep == plane.hex and first.tobytes() != second.tobytes()
