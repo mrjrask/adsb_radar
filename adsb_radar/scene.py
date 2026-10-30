@@ -151,7 +151,7 @@ class Scene:
         name_size = max(16, round(25 * scale))
         for index, (airline, name, route, detail) in enumerate(listed):
             y = height * 0.26 + index * spacing + dy
-            badge = flight_layout.logo_tile(airline, tile)
+            badge = flight_layout.logo_tile(airline, tile, name)
             image.paste(badge, (round(left), round(y)), badge)
             x = left + tile + max(8, 14 * scale)
             self.text(draw, (x, y), name, name_size, bold=True)

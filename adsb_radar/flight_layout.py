@@ -16,7 +16,7 @@ from typing import Any, Optional
 
 from PIL import Image, ImageDraw, ImageFont
 
-from . import aircraft_art, airline_directory, flight_routes, fonts, radar
+from . import aircraft_art, airline_directory, flight_routes, fonts, missing_imagery, radar
 from .models import LiveAircraft, haversine_distance
 
 LANCZOS = Image.Resampling.LANCZOS
@@ -303,10 +303,12 @@ def _logo_tile(airline: Optional[airline_directory.Airline], size: int, logo_mti
     return tile
 
 
-def logo_tile(airline: Optional[airline_directory.Airline], size: int) -> Image.Image:
-    """A *size* square RGBA tile: the airline's logo on white, else a brand-colour badge."""
+def logo_tile(airline: Optional[airline_directory.Airline], size: int, callsign: Optional[str] = None) -> Image.Image:
+    """A *size* square RGBA tile: the airline's logo on white, else a brand-colour badge (and a log entry)."""
 
     path = _logo_path(airline.icao) if airline and airline.icao else None
+    if airline and path is None:
+        missing_imagery.record_logo(airline.icao, ASSET_DIR / "air", airline_name=airline.name, callsign=callsign)
     try:
         mtime = os.path.getmtime(path) if path else None
     except OSError:
@@ -317,7 +319,10 @@ def logo_tile(airline: Optional[airline_directory.Airline], size: int) -> Image.
 def _draw_logo_tile(image: Image.Image, x: int, y: int, size: int, flight: OverheadFlight) -> None:
     """White rounded tile with the airline's logo, or a brand-colour badge."""
 
-    tile = logo_tile(flight.airline, size)
+    callsign = flight.aircraft.callsign
+    if flight.airline is None:  # a callsign naming an airline the directory lacks
+        missing_imagery.record_logo(airline_directory.airline_code(callsign), ASSET_DIR / "air", callsign=callsign)
+    tile = logo_tile(flight.airline, size, callsign)
     image.paste(tile, (x, y), tile)
 
 
@@ -747,6 +752,7 @@ def _draw_aircraft(image: Image.Image, box, flight: OverheadFlight) -> None:
     art = aircraft_art.aircraft_image(width, designator=flight.aircraft.aircraft_type, airline_icao=icao,
                                       brand=airline.color if airline is not None else None,
                                       logo_path=_logo_path(icao or ""))
+    _log_missing_aircraft(flight, art is not None)
     if art is None:  # helicopters and military types have no illustration
         return
     if art.height > bottom - top:
@@ -755,6 +761,27 @@ def _draw_aircraft(image: Image.Image, box, flight: OverheadFlight) -> None:
     x = round(left + (width - art.width) / 2)
     y = round(top + (bottom - top - art.height) / 2)
     image.paste(art, (x, y), art)
+
+
+def _log_missing_aircraft(flight: OverheadFlight, shown: bool) -> None:
+    """Log this type's illustration in the airline's livery when it is not delivered."""
+
+    designator = flight.aircraft.aircraft_type
+    airline = flight.airline
+    icao = airline.icao if airline is not None else None
+    used = aircraft_art.asset_path(designator, icao, aircraft_art.ASSET_DIR)
+    exact = os.path.join(aircraft_art.ASSET_DIR, (icao or aircraft_art.GENERIC).upper(),
+                         f"{(designator or '').strip().upper()}.png")
+    if used is not None and os.path.abspath(used) == os.path.abspath(exact):
+        return
+    if used is not None:
+        instead = os.path.relpath(used, os.path.dirname(aircraft_art.ASSET_DIR))
+    else:
+        instead = "drawn" if shown else "nothing"
+    missing_imagery.record_aircraft(designator, icao, aircraft_art.ASSET_DIR,
+                                    airline_name=airline.name if airline is not None else "",
+                                    type_name=airline_directory.aircraft_type_name(designator),
+                                    callsign=flight.aircraft.callsign, showing_instead=instead)
 
 
 def compose_overhead_image(

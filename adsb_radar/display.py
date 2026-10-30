@@ -11,7 +11,7 @@ from pathlib import Path
 
 from PIL import ImageEnhance
 
-from . import __version__
+from . import __version__, flight_layout, missing_imagery
 from .config import CONFIG_PATH, DEFAULTS, STATE_PATH, atomic_bytes, display_settings, load_config, write_json
 from .feed import Poller
 from .metadata import Metadata, MetadataWorker
@@ -40,6 +40,8 @@ def run(config, state, *, windowed=False, demo=None, frames=None, output=None):
     began = time.monotonic()
     settings, aircraft, online = config, (), False
     metadata = None if demo else Metadata(state)
+    if not demo:  # demo flights are made up; only real ones say what imagery to source
+        missing_imagery.configure(Path(state) / missing_imagery.FILENAME, flight_layout.ASSET_DIR)
     worker = None if demo else MetadataWorker(metadata, config)
     poller = None if demo else Poller(config, state)
     stats = {"version": __version__, "polls": 0, "failures": 0, "healthy_receivers": 0,

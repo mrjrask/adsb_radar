@@ -11,7 +11,7 @@ from pathlib import Path
 from flask import Flask, Response, abort, jsonify, redirect, request, send_file, session
 from werkzeug.security import check_password_hash
 
-from . import __version__, forms
+from . import __version__, forms, missing_imagery
 from .config import CONFIG_PATH, STATE_PATH, check_settings, load_config, read_json, write_json
 
 
@@ -65,7 +65,7 @@ def create_app(config_path=CONFIG_PATH, state_path=STATE_PATH, config=None):
         if request.path == "/healthz" and request.method == "GET":
             return None
         if request.path != "/login" and not session.get("authenticated"):
-            if request.path in ("/status.json", "/preview.png"):
+            if request.path in ("/status.json", "/preview.png", "/missing-imagery.log"):
                 abort(401)
             return redirect("/login", code=303)
         if request.method == "POST" and not secrets.compare_digest(request.form.get("csrf", "").encode(), csrf().encode()):
@@ -131,7 +131,9 @@ def create_app(config_path=CONFIG_PATH, state_path=STATE_PATH, config=None):
         body = pieces(parts).replace(b"<section id=board>",
                                     b'<section><h2>Live preview</h2><img src="/preview.png" '
                                     b'alt="Current display; reload to refresh" '
-                                    b'style="width:100%;image-rendering:auto"></section><section id=board>')
+                                    b'style="width:100%;image-rendering:auto"><p><a href="/missing-imagery.log">'
+                                    b'Missing airline logos and aircraft illustrations</a> (tab-separated)</p>'
+                                    b'</section><section id=board>')
         return Response(body, status=code, content_type="text/html; charset=utf-8")
 
     @app.get("/")
@@ -208,5 +210,13 @@ def create_app(config_path=CONFIG_PATH, state_path=STATE_PATH, config=None):
         if not path.is_file():
             abort(404, "Renderer has not produced a preview yet; check its service logs")
         return send_file(path, mimetype="image/png", max_age=0)
+
+    @app.get("/missing-imagery.log")
+    def missing_imagery_log():
+        path = state / missing_imagery.FILENAME
+        if not path.is_file():
+            return Response("Nothing missing yet: every flight shown had its logo and illustration.\n",
+                            content_type="text/plain; charset=utf-8")
+        return send_file(path, mimetype="text/plain", max_age=0, download_name=missing_imagery.FILENAME)
 
     return app

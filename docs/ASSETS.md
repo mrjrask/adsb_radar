@@ -33,3 +33,27 @@ Installation adds or replaces the supplied files and keeps installed files that
 are not in the checkout. To remove an installed image, delete that file from
 `/var/lib/adsb-radar/images/` and restart the display service. The `--purge`
 uninstaller removes all installed artwork.
+
+## Missing artwork
+
+When the flight board or radar list shows a badge for lack of an airline logo,
+or the flight board shows a drawn or stand-in aircraft for lack of an
+illustration in that airline's livery, the display adds the file it wanted to
+`/var/lib/adsb-radar/missing_imagery.log`. Open it from the admin page (the
+link under the live preview, `http://<Pi-IP>:8080/missing-imagery.log`) or on
+the Pi. It is tab-separated, so it also opens in a spreadsheet:
+
+| Column | Meaning |
+| --- | --- |
+| `first_seen` | When the display first needed it (UTC) |
+| `kind` | `airline_logo` or `aircraft_image` |
+| `airline`, `airline_name` | ICAO airline code and name (`DAL`, Delta Air Lines); empty for an aircraft with no airline |
+| `type`, `type_name` | ICAO type designator and name (`B738`, 737-800), for illustrations |
+| `callsign` | The first flight seen with it |
+| `missing_file` | The file to add, relative to `images/`: `air/<ICAO>.png`, `aircraft/<ICAO>/<TYPE>.png` or `aircraft/_generic/<TYPE>.png` |
+| `showing_instead` | What was shown: `badge`, `drawn`, a stand-in file, or `nothing` |
+
+Each file is listed once however often it is seen. After you add files and
+rerun the installer, rows whose file now exists are dropped the next time the
+display logs something, so the log stays a to-do list. Demo mode logs nothing.
+
