@@ -130,4 +130,4 @@ def test_radar_list_shows_type_badge(config, distant):
     # The badge follows the callsign on the first row; untyped planes get none.
     region = (1380, 270, 1880, 330)
     assert with_type.crop(region).tobytes() != without.crop(region).tobytes()
-    assert scene.list_key[2][0][2] == "B738"
+    assert scene.list_key[2][0][1] == "B738"

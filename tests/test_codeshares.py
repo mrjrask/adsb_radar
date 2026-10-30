@@ -1,5 +1,7 @@
 from dataclasses import replace
 
+import pytest
+
 from adsb_radar import flight_routes
 from adsb_radar.codeshares import codeshare_callsigns
 from adsb_radar.metadata import Metadata
@@ -70,3 +72,65 @@ def test_mainline_flights_ask_only_once(plane, tmp_path, monkeypatch):
     metadata, asked = _metadata(tmp_path, monkeypatch, {})
     metadata.update_route(plane)
     assert asked == ["DAL123"] and metadata.route(plane) is None
+
+
+def _skywest_flight(config, plane, tmp_path, monkeypatch):
+    skywest = replace(plane, callsign="SKW5432", aircraft_type="CRJ9")
+    metadata, _ = _metadata(tmp_path, monkeypatch, {})
+    route = replace(_route("SKW5432", LNK, ORD, "", ""), airline_icao="SKW", codeshares=("DAL5432",))
+    monkeypatch.setattr(metadata, "route", lambda aircraft: route)
+    return skywest, metadata
+
+
+@pytest.mark.parametrize("size", [(3840, 2160), (1920, 1080), (848, 480), (1080, 1080)])
+def test_codeshare_header_is_pixel_identical_to_the_board(config, plane, size):
+    from adsb_radar import airline_directory, flight_layout
+
+    flight = flight_layout.OverheadFlight(replace(plane, callsign="SKW5432"), None,
+                                          airline_directory.airline_for("SKW"), 1, (plane,),
+                                          ((airline_directory.airline_for("DAL"), "DAL5432"),))
+    board = flight_layout.compose_overhead_image(flight, width=size[0], height=size[1], traffic=False)
+    box = flight_layout.header_box(*size)
+    assert flight_layout.compose_header(flight, *size, 0).tobytes() == board.crop(box).tobytes()
+    assert flight_layout.compose_header(flight, *size, 1).tobytes() != board.crop(box).tobytes()
+
+
+def test_flight_board_fades_between_codeshare_logos_and_numbers(config, plane, tmp_path, monkeypatch):
+    from adsb_radar import flight_layout
+    from adsb_radar.scene import Scene
+
+    skywest, metadata = _skywest_flight(config, plane, tmp_path, monkeypatch)
+    scene = Scene((1920, 1080))
+    period = flight_layout.CODESHARE_HOLD + flight_layout.CODESHARE_FADE
+    box = flight_layout.header_box(1920, 1080)
+
+    def header(at):
+        return scene.render((skywest,), config, metadata, now=at).crop(box).tobytes()
+
+    start = 1000 * period
+    flight = select_flight((skywest,), config, metadata)
+    operator = flight_layout.compose_header(flight, 1920, 1080, 0).tobytes()
+    delta = flight_layout.compose_header(flight, 1920, 1080, 1).tobytes()
+    blank = flight_layout.compose_header(flight, 1920, 1080, None).tobytes()
+    assert header(start) == operator == header(start + 1)  # holding
+    assert header(start + flight_layout.CODESHARE_HOLD + flight_layout.CODESHARE_FADE / 2) == blank
+    assert header(start + flight_layout.CODESHARE_HOLD + flight_layout.CODESHARE_FADE * 0.25) not in (
+        operator, blank, delta)
+    assert header(start + period + 1) == delta
+    assert header(start + 2 * period + 1) == operator
+
+
+def test_radar_list_fades_codeshare_rows_in_place(config, plane, tmp_path, monkeypatch):
+    from adsb_radar import flight_layout
+    from adsb_radar.scene import Scene
+
+    skywest, metadata = _skywest_flight(config, plane, tmp_path, monkeypatch)
+    far = replace(skywest, distance=7)  # outside RADIUS: the idle radar with its list
+    scene = Scene((1920, 1080))
+    period = flight_layout.CODESHARE_HOLD + flight_layout.CODESHARE_FADE
+    start = 1000 * period
+    frames = [scene.render((far,), {**config, "RADAR_SWEEP": False}, metadata, now=start + t).crop((1200, 250, 1900, 360))
+              for t in (0, 1, period + 1, flight_layout.CODESHARE_HOLD + flight_layout.CODESHARE_FADE / 2)]
+    assert frames[0].tobytes() == frames[1].tobytes()
+    assert frames[0].tobytes() != frames[2].tobytes()
+    assert frames[3].tobytes() not in (frames[0].tobytes(), frames[2].tobytes())

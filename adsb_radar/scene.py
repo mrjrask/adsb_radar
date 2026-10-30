@@ -21,10 +21,18 @@ def select_flight(aircraft, settings, metadata, keep=None):
         return None
     plane = min(eligible, key=lambda a: cone.rank(a, settings["DISTANCE_UNIT"]) if cone else a.distance)
     route = metadata.route(plane) if metadata else None
+    airline, codeshares = airlines_for(plane, route)
+    return flight_layout.OverheadFlight(plane, route, airline, len(eligible), tuple(aircraft), codeshares)
+
+
+def airlines_for(plane, route):
+    """The operating airline, and (airline, callsign) for each codeshare the flight is sold as."""
+
     code = route.airline_icao if route and route.airline_icao else airline_directory.airline_code(plane.callsign)
     airline = airline_directory.airline_for(code, name=route.airline_name if route else "",
                                           iata=route.airline_iata if route else "")
-    return flight_layout.OverheadFlight(plane, route, airline, len(eligible), tuple(aircraft))
+    codeshares = tuple((airline_directory.airline_for(c[:3]), c) for c in (route.codeshares if route else ()))
+    return airline, codeshares
 
 
 class Scene:
@@ -36,8 +44,10 @@ class Scene:
         self.flight_image = None
         self.keep = None
         self.flight_box = None
+        self.headers = self.header_box = None
         self.routes = {}
         self.list_key = self.list_image = self.list_box = None
+        self.panels = {}
 
     def text(self, draw, position, text, size, color=(225, 235, 240), bold=False, anchor=None, role=None):
         # Projector labels stay at least 12px high rather than shrinking in
@@ -118,28 +128,44 @@ class Scene:
         listed = []
         for plane in planes[:rows]:
             route = self.route(plane, metadata, now)
-            code = route.airline_icao if route and route.airline_icao else airline_directory.airline_code(plane.callsign)
-            airline = airline_directory.airline_for(code, name=route.airline_name if route else "",
-                                                  iata=route.airline_iata if route else "")
-            listed.append((airline, plane.callsign or plane.hex.upper(), (plane.aircraft_type or "").strip().upper(),
-                           radar.altitude_color(colors, plane.altitude_ft),
+            airline, codeshares = airlines_for(plane, route)
+            listed.append((((airline, plane.callsign or plane.hex.upper()),) + codeshares,
+                           (plane.aircraft_type or "").strip().upper(), radar.altitude_color(colors, plane.altitude_ft),
                            f"{route.origin.code} → {route.destination.code}" if route and route.origin and route.destination
                            else "",
                            f"{plane.altitude_ft:,} ft · {plane.distance:.1f} {unit}" if plane.altitude_ft is not None
                            else f"Altitude unknown · {plane.distance:.1f} {unit}"))
-        # Text is the slow part of a frame, so the list is redrawn only when a line changes.
+        # Text is the slow part of a frame, so the list is redrawn only when a line changes
+        # (or a codeshare flight moves on to its next airline).
         key = (self.background_key, len(planes), tuple(listed))
         if key != self.list_key:
-            self.list_key = key
-            box = (round(left), round(height * 0.15), width, round(height * 0.81))
-            panel = self.background.crop(box)
-            self.aircraft_list(panel, -box[0], -box[1], listed, len(planes), reach, unit, colors, scale)
-            self.list_image, self.list_box = panel, box
+            self.list_key, self.panels = key, {}
+            self.list_box = (round(left), round(height * 0.15), width, round(height * 0.81))
+
+        def panel(step):
+            if step not in self.panels:
+                if len(self.panels) > 6:
+                    self.panels.clear()
+                image = self.background.crop(self.list_box)
+                self.aircraft_list(image, -self.list_box[0], -self.list_box[1], listed, len(planes), reach, unit,
+                                   colors, scale, step)
+                self.panels[step] = image
+            return self.panels[step]
+
+        step, fade = flight_layout.codeshare_phase(now)
+        if all(len(row[0]) == 1 for row in listed):
+            step, fade = 0, 0.0
+        self.list_image = flight_layout.crossfade(panel(step), panel(None) if fade else None, panel(step + 1)
+                                                  if fade else None, fade)
         image.paste(self.list_image, self.list_box[:2])
         return image
 
-    def aircraft_list(self, image, dx, dy, listed, count, reach, unit, colors, scale):
-        """The aircraft count and the nearest flights (logo, callsign, route, type, altitude and distance)."""
+    def aircraft_list(self, image, dx, dy, listed, count, reach, unit, colors, scale, step=0):
+        """The aircraft count and the nearest flights (logo, callsign, route, type, altitude and distance).
+
+        A codeshare flight shows its airline ``step % count``; with *step* None its logo and
+        callsign are left out (the midpoint of a fade). The type and route stay put either way.
+        """
 
         width, height = self.size
         draw = ImageDraw.Draw(image)
@@ -151,14 +177,17 @@ class Scene:
         tile = round(spacing * 0.78)
         name_size = max(16, round(25 * scale))
         gap = max(8, 14 * scale)
-        for index, (airline, name, aircraft_type, band, route, detail) in enumerate(listed):
+        for index, (brands, aircraft_type, band, route, detail) in enumerate(listed):
             y = height * 0.26 + index * spacing + dy
-            badge = flight_layout.logo_tile(airline, tile)
-            image.paste(badge, (round(left), round(y)), badge)
             x = left + tile + max(8, 14 * scale)
-            self.text(draw, (x, y), name, name_size, bold=True)
             name_font = fonts.load("heading", max(16, name_size), True)
-            after = x + draw.textlength(name, font=name_font) + gap
+            if step is not None or len(brands) == 1:
+                airline, name = brands[(step or 0) % len(brands)]
+                badge = flight_layout.logo_tile(airline, tile)
+                image.paste(badge, (round(left), round(y)), badge)
+                self.text(draw, (x, y), name, name_size, bold=True)
+            # After the widest of the flight's numbers, so nothing moves as they change.
+            after = x + max(draw.textlength(name, font=name_font) for _airline, name in brands) + gap
             if aircraft_type:
                 _left, cap_top, _right, cap_bottom = draw.textbbox((x, y), "H", font=name_font)
                 after = self.type_badge(draw, after, (cap_top + cap_bottom) / 2, aircraft_type, band, name_size) + gap
@@ -196,9 +225,23 @@ class Scene:
                     unit=settings["DISTANCE_UNIT"], radius=settings["RADIUS"], radar_range=settings["RADAR_RANGE"],
                     settings=settings, traffic=False)
                 self.flight_box = flight_layout.radar_box(*self.size)
-            if self.flight_box is None:
+                self.headers, self.header_box = {}, flight_layout.header_box(*self.size)
+            brands = len(flight_layout.identities(flight))
+            step, fade = flight_layout.codeshare_phase(now)
+            if self.flight_box is None and brands == 1:
                 return self.flight_image
             image = self.flight_image.copy()
+            if brands > 1:
+                def header(brand):
+                    if brand not in self.headers:
+                        self.headers[brand] = flight_layout.compose_header(flight, *self.size, brand)
+                    return self.headers[brand]
+
+                shown = flight_layout.crossfade(header(step % brands), header(None) if fade else None,
+                                                header((step + 1) % brands) if fade else None, fade)
+                image.paste(shown, self.header_box[:2])
+            if self.flight_box is None:
+                return image
             flight_layout.draw_sky_traffic(image, self.flight_box, flight, settings, now,
                                            radius=settings["RADIUS"], unit=settings["DISTANCE_UNIT"],
                                            reach=settings["RADAR_RANGE"])
