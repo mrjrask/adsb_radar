@@ -183,7 +183,7 @@ class Scene:
             name_font = fonts.load("heading", max(16, name_size), True)
             if step is not None or len(brands) == 1:
                 airline, name = brands[(step or 0) % len(brands)]
-                badge = flight_layout.logo_tile(airline, tile)
+                badge = flight_layout.logo_tile(airline, tile, name)
                 image.paste(badge, (round(left), round(y)), badge)
                 self.text(draw, (x, y), name, name_size, bold=True)
             # After the widest of the flight's numbers, so nothing moves as they change.

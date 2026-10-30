@@ -102,6 +102,11 @@ aircraft. To add or replace artwork, commit it at the same paths, then
 `git pull` on the Pi and rerun `sudo ./install.sh`. See
 [the artwork guide](docs/ASSETS.md) for naming and lookup order.
 
+Each logo or illustration the display wanted but did not have is listed once in
+`/var/lib/adsb-radar/missing_imagery.log`, with the airline, aircraft type and
+an example callsign, so you know what to source. The admin page links to it
+under the live preview. See [Missing artwork](docs/ASSETS.md#missing-artwork).
+
 ## Update and remove
 
 ```sh
