@@ -120,3 +120,14 @@ def test_flight_board_sky_map_animates(config, plane, distant):
     first = scene.render((plane, distant), config, now=stamp)
     second = scene.render((plane, distant), config, now=stamp + 0.9)
     assert scene.keep == plane.hex and first.tobytes() != second.tobytes()
+
+
+def test_radar_list_shows_type_badge(config, distant):
+    scene = Scene((1920, 1080))
+    stamp = time.time()
+    with_type = scene.render((distant,), config, now=stamp)
+    without = Scene((1920, 1080)).render((replace(distant, aircraft_type=None),), config, now=stamp)
+    # The badge follows the callsign on the first row; untyped planes get none.
+    region = (1380, 270, 1880, 330)
+    assert with_type.crop(region).tobytes() != without.crop(region).tobytes()
+    assert scene.list_key[2][0][2] == "B738"

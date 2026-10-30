@@ -121,7 +121,8 @@ class Scene:
             code = route.airline_icao if route and route.airline_icao else airline_directory.airline_code(plane.callsign)
             airline = airline_directory.airline_for(code, name=route.airline_name if route else "",
                                                   iata=route.airline_iata if route else "")
-            listed.append((airline, plane.callsign or plane.hex.upper(),
+            listed.append((airline, plane.callsign or plane.hex.upper(), (plane.aircraft_type or "").strip().upper(),
+                           radar.altitude_color(colors, plane.altitude_ft),
                            f"{route.origin.code} → {route.destination.code}" if route and route.origin and route.destination
                            else "",
                            f"{plane.altitude_ft:,} ft · {plane.distance:.1f} {unit}" if plane.altitude_ft is not None
@@ -138,7 +139,7 @@ class Scene:
         return image
 
     def aircraft_list(self, image, dx, dy, listed, count, reach, unit, colors, scale):
-        """The aircraft count and the nearest flights (logo, callsign, route, altitude and distance)."""
+        """The aircraft count and the nearest flights (logo, callsign, route, type, altitude and distance)."""
 
         width, height = self.size
         draw = ImageDraw.Draw(image)
@@ -149,16 +150,32 @@ class Scene:
         spacing = height * 0.53 / rows
         tile = round(spacing * 0.78)
         name_size = max(16, round(25 * scale))
-        for index, (airline, name, route, detail) in enumerate(listed):
+        gap = max(8, 14 * scale)
+        for index, (airline, name, aircraft_type, band, route, detail) in enumerate(listed):
             y = height * 0.26 + index * spacing + dy
             badge = flight_layout.logo_tile(airline, tile)
             image.paste(badge, (round(left), round(y)), badge)
             x = left + tile + max(8, 14 * scale)
             self.text(draw, (x, y), name, name_size, bold=True)
+            name_font = fonts.load("heading", max(16, name_size), True)
+            after = x + draw.textlength(name, font=name_font) + gap
+            if aircraft_type:
+                _left, cap_top, _right, cap_bottom = draw.textbbox((x, y), "H", font=name_font)
+                after = self.type_badge(draw, after, (cap_top + cap_bottom) / 2, aircraft_type, band, name_size) + gap
             if route:
-                after = x + draw.textlength(name, font=fonts.load("heading", name_size, True)) + max(8, 14 * scale)
                 self.text(draw, (after, y + name_size * 0.1), route, 21 * scale, colors["RADAR_COUNT"])
             self.text(draw, (x, y + max(18, 32 * scale)), detail, 19 * scale, (150, 165, 175), role="mono")
+
+    def type_badge(self, draw, left, middle, code, color, height):
+        """The ICAO type designator (B738, A21N) in a pill of the plane's altitude colour; returns its right edge."""
+
+        font = fonts.load("mono_bold", max(16, round(height * 0.72)))
+        pad = max(5, round(height * 0.3))
+        right = left + draw.textlength(code, font=font) + pad * 2
+        half = max(10, height * 0.5)
+        draw.rounded_rectangle((left, middle - half, right, middle + half), radius=half, fill=color)
+        draw.text(((left + right) / 2, middle), code, font=font, fill=flight_layout._contrast_text(color), anchor="mm")
+        return right
 
     def render(self, aircraft, settings, metadata=None, *, online=True, now=None):
         now = time.time() if now is None else now
