@@ -2,12 +2,13 @@
 
 A standalone **Raspberry Pi 4 HDMI flight board and animated radar**, designed
 for **Raspberry Pi OS Trixie Lite**. It runs straight from the Linux console
-with SDL2 KMS/DRM. No desktop, browser kiosk, X11, or Wayland session is needed.
+through the console framebuffer (SDL2 KMS/DRM is optional). No desktop, browser kiosk,
+X11, or Wayland session is needed.
 
 It reads your combined tar1090 feed or individual dump1090/readsb/PiAware receivers over the network.
-It does **not** require a Desk Display server. The high resolution flight
-layout, aircraft illustration fallback, airline directory, and visibility
-cone are adapted from [desk_display](https://github.com/mrjrask/desk_display).
+It runs standalone. The high resolution flight layout, aircraft illustration
+fallback, airline directory, and visibility cone are adapted from
+[desk_display](https://github.com/mrjrask/desk_display).
 
 ## Display
 
@@ -18,7 +19,6 @@ cone are adapted from [desk_display](https://github.com/mrjrask/desk_display).
 | `848x480` | **848 × 480** | Projector layout with fitted route tiles, artwork, radar, and metrics; readable minimum radar labels and up to 5 nearby flights. |
 | `auto` | The connected display's current native HDMI mode | Default; adapts the layout to the detected size. |
 
-These are full-resolution drawings, independent of the 64×64 LED protocol.
 Airport codes use shaded split-flap tiles and **Bebas Neue** lettering;
 clocks and numerical readouts use **JetBrains Mono**; descriptive text uses
 **DejaVu Sans**. The installer installs all three font families through apt.
@@ -90,25 +90,14 @@ and `index.html` are removed. The admin page shows the configured feed address;
 its online count refers to feed endpoints, so one aggregator is **one feed**
 even when it combines multiple receivers.
 
-## Upload the artwork manually
+## Artwork
 
-**No image assets are bundled or downloaded by this project.** Empty tracked
-folders are ready for your uploads:
-
-```text
-images/air/DAL.png                    airline logo (ICAO code)
-images/aircraft/DAL/B738.png           aircraft in airline livery
-images/aircraft/_generic/B738.png      generic type fallback
-```
-
-Upload your Desk Display files to the same paths in this repository, then
-`git pull` on the Pi and rerun `sudo ./install.sh`. The installer copies the
-artwork you supplied into `/var/lib/adsb-radar/images`. Existing local artwork
-is preserved during updates. [The asset guide](docs/ASSETS.md) lists the
-folders and exact filenames from the source project.
-
-The app works without artwork: it draws airline badges and procedural aircraft
-illustrations. Once a type-specific file is supplied, that image takes priority.
+Airline logos are in `images/air/` and aircraft illustrations in
+`images/aircraft/`; the installer copies them to `/var/lib/adsb-radar/images`.
+Without a matching file the app draws an airline badge or a procedural
+aircraft. To add or replace artwork, commit it at the same paths, then
+`git pull` on the Pi and rerun `sudo ./install.sh`. See
+[the artwork guide](docs/ASSETS.md) for naming and lookup order.
 
 ## Update and remove
 

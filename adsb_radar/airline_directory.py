@@ -391,49 +391,6 @@ AIRCRAFT_TYPES: dict[str, str] = {
 # Who makes each type, for boards that print the maker on its own line. The
 # first entry whose prefix starts the board name wins; with strip=True the
 # prefix is the maker's word and comes off the model line.
-_MAKERS: tuple[tuple[str, str, bool], ...] = (
-    ("Cessna ", "Cessna", True),
-    ("Citation", "Cessna", False),
-    ("Piper ", "Piper", True),
-    ("Diamond ", "Diamond", True),
-    ("Cirrus ", "Cirrus", True),
-    ("Pilatus ", "Pilatus", True),
-    ("Robinson ", "Robinson", True),
-    ("Sikorsky ", "Sikorsky", True),
-    ("Bell ", "Bell", True),
-    ("Beech ", "Beechcraft", True),
-    ("King Air", "Beechcraft", False),
-    ("Bonanza", "Beechcraft", False),
-    ("Baron", "Beechcraft", False),
-    ("Saab ", "Saab", True),
-    ("Gulfstream ", "Gulfstream", True),
-    ("Hawker ", "Hawker", True),
-    ("ATR ", "ATR", True),
-    ("HondaJet", "Honda", False),
-    ("Challenger", "Bombardier", False),
-    ("Global", "Bombardier", False),
-    ("Learjet", "Bombardier", False),
-    ("CRJ", "Bombardier", False),
-    ("Dash 8", "De Havilland", False),
-    ("ERJ", "Embraer", False),
-    ("E1", "Embraer", False),
-    ("Phenom", "Embraer", False),
-    ("Praetor", "Embraer", False),
-    ("Falcon", "Dassault", False),
-    ("MD-", "McDonnell Douglas", False),
-    ("DC-", "McDonnell Douglas", False),
-    ("AW", "Leonardo", False),
-    ("EC", "Airbus", False),
-    ("H1", "Airbus", False),
-    ("A2", "Airbus", False),
-    ("A3", "Airbus", False),
-    ("7", "Boeing", False),
-    ("B-52", "Boeing", False),
-    ("C-17", "Boeing", False),
-    ("KC-", "Boeing", False),
-    ("C-130", "Lockheed", False),
-    ("C-5", "Lockheed", False),
-)
 
 _AIRLINE_SUFFIX_RE = re.compile(r"\s+(Airlines|Air Lines|Airways|Airline)$", re.I)
 
@@ -488,16 +445,4 @@ def aircraft_type_name(designator: Optional[str]) -> str:
     return AIRCRAFT_TYPES.get(code, code)
 
 
-def aircraft_type_lines(designator: Optional[str]) -> tuple[str, str]:
-    """'B38M' -> ('Boeing', '737 MAX 8'); ('', name) when the maker is unknown."""
-
-    name = aircraft_type_name(designator)
-    if (designator or "").strip().upper() not in AIRCRAFT_TYPES:
-        return "", name
-    for prefix, maker, strip in _MAKERS:
-        if name.startswith(prefix):
-            return maker, name[len(prefix):].strip() if strip else name
-    return "", name
-
-
-__all__ = ["AIRCRAFT_TYPES", "AIRLINES", "Airline", "aircraft_type_lines", "aircraft_type_name", "airline_code", "airline_for"]
+__all__ = ["AIRCRAFT_TYPES", "AIRLINES", "Airline", "aircraft_type_name", "airline_code", "airline_for"]

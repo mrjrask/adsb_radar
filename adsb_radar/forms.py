@@ -10,7 +10,7 @@ SECTIONS = (('Display settings',
   (('IDLE',
     'Idle boards',
     'idles',
-    (('server', 'Use defaults'),
+    (('default', 'Use defaults'),
      ('clock', 'Clock'),
      ('radar', 'Radar'),
      ('message', 'Clear skies message'),
@@ -152,19 +152,6 @@ SECTIONS = (('Display settings',
      ('848x480', 'Projector — 848 × 480', '848x480')),
     'Renders at the selected native resolution. The connected display must advertise that HDMI mode.'),)))
 
-COLORS = (('BACKGROUND', 'Radar background'),
- ('SWEEP_COLOR', 'Sweep color'),
- ('RING', 'Outer ring'),
- ('RING_DIM', 'Intermediate ring'),
- ('HOME_RING', 'Flight radius ring'),
- ('NORTH', 'North indicator'),
- ('COUNT', 'Aircraft count'),
- ('RANGE_COLOR', 'Outer-ring distance label'),
- ('ALT_1', 'Altitude: below 4,000 ft'),
- ('ALT_2', 'Altitude: 4,000–9,999 ft'),
- ('ALT_3', 'Altitude: 10,000–19,999 ft'),
- ('ALT_4', 'Altitude: 20,000–29,999 ft'),
- ('ALT_5', 'Altitude: 30,000 ft and above'))
 
 RADAR_COLOR_DEFAULTS = {'RADAR_BACKGROUND': '#001400',
  'RADAR_SWEEP_COLOR': '#00FF00',
@@ -180,19 +167,6 @@ RADAR_COLOR_DEFAULTS = {'RADAR_BACKGROUND': '#001400',
  'RADAR_ALT_4': '#00FFFF',
  'RADAR_ALT_5': '#FF00FF'}
 
-RADAR_COLOR_NIGHT = {'RADAR_BACKGROUND': '#000000',
- 'RADAR_SWEEP_COLOR': '#FF0000',
- 'RADAR_RING': '#780000',
- 'RADAR_RING_DIM': '#3C0000',
- 'RADAR_HOME_RING': '#FFA000',
- 'RADAR_NORTH': '#00FFFF',
- 'RADAR_COUNT': '#FFFFFF',
- 'RADAR_RANGE_COLOR': '#780000',
- 'RADAR_ALT_1': '#FF0000',
- 'RADAR_ALT_2': '#FFA000',
- 'RADAR_ALT_3': '#FFFF00',
- 'RADAR_ALT_4': '#00FFFF',
- 'RADAR_ALT_5': '#FF00FF'}
 
 BUILTIN_PRESETS = {'Daytime': {'RADAR_BACKGROUND': '#001400',
              'RADAR_SWEEP_COLOR': '#00FF00',
@@ -231,7 +205,7 @@ DISPLAY_DEFAULTS = {'RADIUS': 3,
  'RADAR_LIGHTS': True,
  'RADAR_SWEEP': True,
  'CLOCK_24H': False,
- 'BRIGHTNESS': 'auto',
+ 'BRIGHTNESS': 1.0,
  'POLL_SECONDS': 5}
 
 FIELDS = {field[0]: field for _title, fields in SECTIONS for field in fields}
@@ -264,7 +238,7 @@ def validate(form, brightness_choices=()):
             continue
         if kind == "idles":
             ticked = [name for name, _label in spec if form.get(key + "_" + name)]
-            if "server" in ticked:
+            if "default" in ticked:
                 overrides[key] = None  # inherit config.json
             elif ticked:
                 overrides[key] = ",".join(ticked)
@@ -294,13 +268,10 @@ def validate(form, brightness_choices=()):
             else:
                 errors[key] = label + ": not one of the choices"
         elif kind == "brightness":
-            if text == "auto" and "auto" in brightness_choices:
-                overrides[key] = "auto"
-            else:
-                try:
-                    overrides[key] = _number(text, 0.001, 1)
-                except ValueError:
-                    errors[key] = label + ": not one of the choices"
+            try:
+                overrides[key] = _number(text, 0.001, 1)
+            except ValueError:
+                errors[key] = label + ": not one of the choices"
     if ("LATITUDE" in overrides) != ("LONGITUDE" in overrides):
         errors["LATITUDE"] = "Set both latitude and longitude, or neither"
     return overrides, errors
@@ -308,7 +279,6 @@ def validate(form, brightness_choices=()):
 
 # ── Effective display settings ─────────────────────────────────────────────
 
-# X-I75F-Cone names, as the settings they report.
 
 
 def horizon_dict(text):
@@ -325,24 +295,22 @@ def horizon_dict(text):
     return cutoffs
 
 
+def in_effect(effective):
+    """One line on the cone the renderer is drawing with, for the top of the cone section."""
 
-
-def in_effect(server):
-    """One line on the cone the server is drawing with, for the top of the cone section."""
-
-    if not server:
+    if not effective:
         return ("Values in effect are available after the renderer starts. "
                 "Reload this page to refresh.")
-    unit = server.get("unit", "")
+    unit = effective.get("unit", "")
     parts = []
-    if server.get("MIN_ELEVATION") is None and not server.get("HORIZON"):
-        parts.append("cone off, radius {} {}".format(shown(server.get("RADIUS")), unit))
+    if effective.get("MIN_ELEVATION") is None and not effective.get("HORIZON"):
+        parts.append("cone off, radius {} {}".format(shown(effective.get("RADIUS")), unit))
     else:
-        parts.append("cutoff {}\u00b0".format(shown(server.get("MIN_ELEVATION") or 0)))
-        horizon = server.get("HORIZON") or {}
+        parts.append("cutoff {}\u00b0".format(shown(effective.get("MIN_ELEVATION") or 0)))
+        horizon = effective.get("HORIZON") or {}
         parts.extend("{} {}\u00b0".format(name, shown(horizon[name])) for name in SECTORS if name in horizon)
-        parts.append("home {} ft".format(shown(server.get("HOME_ELEVATION_FT") or 0)))
-        parts.append("max range {} {}".format(shown(server.get("MAX_RANGE")), unit))
+        parts.append("home {} ft".format(shown(effective.get("HOME_ELEVATION_FT") or 0)))
+        parts.append("max range {} {}".format(shown(effective.get("MAX_RANGE")), unit))
     return "In effect now (current display settings): " + ", ".join(parts) + "."
 
 
@@ -423,23 +391,23 @@ DOME = (
 )
 
 
-def _field(key, label, kind, spec, help_text, values, defaults, errors, brightness_choices, server=None):
+def _field(key, label, kind, spec, help_text, values, defaults, errors, brightness_choices, effective=None):
     """One setting's inputs. Blank inputs show, greyed, what applies instead:
-    config.json's value, else what the server last said it draws with (*server*,
-    parse_cone()), so the fields and the dome show the values really in effect."""
+    config.json's value, else what the renderer last reported drawing with
+    (*effective*), so the fields and the dome show the values really in effect."""
 
     parts = []
-    server = server or {}
+    effective = effective or {}
     default = defaults.get(key)
     source = "config.json"
-    if default is None and key in server:
-        default, source = server[key], "server"
+    if default is None and key in effective:
+        default, source = effective[key], "in effect"
     elif default is None and key in DISPLAY_DEFAULTS:
         default, source = DISPLAY_DEFAULTS[key], "default"
     if key == "RADAR_RANGE" and default is None:
         radius = values.get("RADIUS", defaults.get("RADIUS"))
         if radius is None:
-            radius = server.get("RADIUS", DISPLAY_DEFAULTS["RADIUS"])
+            radius = effective.get("RADIUS", DISPLAY_DEFAULTS["RADIUS"])
         default, source = 4 * radius, "default"
     if kind == "horizon":
         parts.append("<label>{}</label><div class=grid>".format(escape(label)))
@@ -447,8 +415,8 @@ def _field(key, label, kind, spec, help_text, values, defaults, errors, brightne
         default = defaults.get(key) or {}
         if isinstance(default, str):  # config.json may give "N45,NE40"
             default = horizon_dict(default)
-        if not default:  # config.json sends none: the server's own HORIZON applies
-            default = server.get(key) or {}
+        if not default:  # config.json sends none: the renderer's HORIZON applies
+            default = effective.get(key) or {}
         if current:  # a saved HORIZON replaces the inherited one whole: blank directions use the cutoff
             default = {}
         for sector in SECTORS:
@@ -464,7 +432,7 @@ def _field(key, label, kind, spec, help_text, values, defaults, errors, brightne
     elif kind == "idles":
         current = values.get(key)
         if key in values and current is None:
-            ticked = ["server"]
+            ticked = ["default"]
         else:
             ticked = [name.strip() for name in current.split(",")] if isinstance(current, str) else []
         parts.append("<label>{}</label>".format(escape(label)))
@@ -489,7 +457,7 @@ def _field(key, label, kind, spec, help_text, values, defaults, errors, brightne
             parts.append('<option value="{}"{}>{}</option>'.format(escape(value), selected, escape(option_label)))
         parts.append("</select>")
     elif kind == "hex":
-        default = defaults.get(key) or server.get(key) or RADAR_COLOR_DEFAULTS[key]
+        default = defaults.get(key) or effective.get(key) or RADAR_COLOR_DEFAULTS[key]
         if key not in values:
             parts.append('<input type=hidden name="inherit_{}" value="{}">'.format(key, escape(default)))
         parts.append('<label for="{0}">{1}</label><div class=color-row><input id="{0}" name="{0}" '
@@ -500,7 +468,7 @@ def _field(key, label, kind, spec, help_text, values, defaults, errors, brightne
                          key, escape(label), escape(values.get(key, default)), escape(default)))
     else:
         text = values.get(key, "")
-        hint = source + ": " + ("off" if source == "server" and default is None else shown(default))
+        hint = source + ": " + ("off" if source == "in effect" and default is None else shown(default))
         parts.append('<label for="{0}">{1}</label><input id="{0}" name="{0}" value="{2}" '
                      'placeholder="{3}" inputmode=decimal>'.format(
                          key, escape(label), escape(shown(text) if text != "" else ""), escape(hint)))
@@ -517,11 +485,11 @@ def table(rows):
 
 
 def page(values, defaults, status, csrf, message="", errors=None, brightness_choices=(),
-         diagnostics=(), server=None, presets=None):
+         diagnostics=(), effective=None, presets=None):
     """The admin page as a list of pieces (str and bytes), never one string.
 
     *values*: the saved (or just submitted) overrides; *defaults*: config.json's;
-    *server*: the renderer's effective settings.
+    *effective*: the renderer's effective settings.
     """
 
     errors = errors or {}
@@ -563,19 +531,19 @@ def page(values, defaults, status, csrf, message="", errors=None, brightness_cho
         if index == 0:
             out.append("<p class=muted>Choose what appears when no aircraft is overhead. "
                        "Blank fields keep inherited settings.</p>")
-            reach = (server or {}).get("RADAR_RANGE")
-            reach_text = (shown(reach) + " " + (server or {}).get("unit", "")
+            reach = (effective or {}).get("RADAR_RANGE")
+            reach_text = (shown(reach) + " " + (effective or {}).get("unit", "")
                           if reach is not None else "not available yet")
             out.append("<p class=note>Effective outer-ring range: {}. "
                        "Values update after the next check.</p>".format(escape(reach_text)))
         if any(field[2] == "horizon" for field in fields):  # the cone: say what is in effect first
             out.append("<p class=note>{}</p><input type=hidden id=srvunit value=\"{}\">".format(
-                escape(in_effect(server)), escape((server or {}).get("unit", ""))))
+                escape(in_effect(effective)), escape((effective or {}).get("unit", ""))))
         for field in fields:
             if field[2] == "horizon":
                 out.append(DOME)
             out.append('<div class=field>')
-            out.append(_field(*field, values, defaults, errors, brightness_choices, server))
+            out.append(_field(*field, values, defaults, errors, brightness_choices, effective))
             out.append('</div>')
         out.append('</section>')
     out.append("<div class=savebar><button>Save all settings</button>"

@@ -10,10 +10,10 @@ This is a Raspberry Pi HDMI adaptation of projects owned by `mrjrask`:
   cone, and route parsing/geometry. These modules were adapted to the smaller
   standalone application and use local network receiver data.
 
-No source image files, proprietary logos, font binaries, or private
-configuration were copied into this repository. `images/` contains empty
-placeholders and upload instructions. Artwork is supplied manually by the
-repository owner and retains its applicable rights.
+The artwork in `images/` was added by the repository owner from desk_display.
+Airline names and logos are trademarks of their respective owners and retain
+their applicable rights. No font binaries or private configuration are
+included.
 
 Fonts are installed as Debian packages, with their respective notices:
 

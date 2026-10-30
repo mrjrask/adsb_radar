@@ -1,4 +1,4 @@
-"""Native-resolution radar animation and the Desk Display flight layout."""
+"""Native-resolution radar animation, idle screens and the flight board."""
 
 import math
 import time

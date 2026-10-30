@@ -95,7 +95,7 @@ def check_settings(values):
         elif kind == "brightness":
             valid = type(value) in (int, float) and math.isfinite(value) and 0.001 <= value <= 1
         elif kind == "idles":
-            valid = isinstance(value, str) and all(v in {s[0] for s in spec} - {"server"}
+            valid = isinstance(value, str) and all(v in {s[0] for s in spec} - {"default"}
                                                   for v in value.split(","))
         elif kind == "horizon":
             valid = isinstance(value, dict) and all(
