@@ -124,7 +124,7 @@ def run(config, state, *, windowed=False, demo=None, frames=None):
                 aircraft = metadata.enrich(aircraft)
                 next_metadata = monotonic + 1
             image = scene.render(aircraft, settings, metadata, online=online, now=now,
-                                 health="Demo receiver" if demo else f'{stats["healthy_receivers"]}/{len(config["RECEIVER_URLS"])} receivers online')
+                                 health="Demo feed" if demo else f'{stats["healthy_receivers"]}/{len(config["RECEIVER_URLS"])} feeds online')
             surface = pygame.image.fromstring(image.tobytes(), image.size, "RGB")
             level = settings.get("BRIGHTNESS") or 1.0
             if level < 1:

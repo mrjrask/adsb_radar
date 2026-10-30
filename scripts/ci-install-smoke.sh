@@ -46,6 +46,29 @@ assert app.test_client().get('/healthz').status_code == 200
 PY
 runuser -u adsb-radar -- env SDL_VIDEODRIVER=dummy \
     sh -c 'cd /opt/adsb-radar && exec /usr/bin/python3 -m adsb_radar.display --windowed --demo radar --frames 2 --state-dir /var/lib/adsb-radar'
+# Switch the installed configuration to one combined tar1090 feed, retaining
+# credentials, data, and the service account's ability to read config.json.
+python3 - <<'PY'
+import json
+with open('/etc/adsb-radar/config.json') as stream:
+    config = json.load(stream)
+with open('/tmp/original-credentials.json', 'w') as stream:
+    json.dump({k: config[k] for k in ('ADMIN_PASSWORD_HASH', 'SECRET_KEY')}, stream)
+PY
+bash install.sh --no-start --tar1090 127.0.0.1:59999
+test "$(stat -c '%U:%G:%a' /etc/adsb-radar/config.json)" = root:adsb-radar:640
+runuser -u adsb-radar -- sh -c 'cd /opt/adsb-radar && exec /usr/bin/python3 -' <<'PY'
+from adsb_radar.config import load_config
+assert load_config()['RECEIVER_URLS'] == ['http://127.0.0.1:59999']
+PY
+python3 - <<'PY'
+import json
+with open('/etc/adsb-radar/config.json') as stream:
+    current = json.load(stream)
+with open('/tmp/original-credentials.json') as stream:
+    previous = json.load(stream)
+assert all(current[k] == v for k, v in previous.items())
+PY
 # Also exercise the actual Gunicorn entry point, independent of HDMI.
 runuser -u adsb-radar -- sh -c 'cd /opt/adsb-radar && exec /usr/bin/python3 -m adsb_radar.admin' &
 admin_pid=$!

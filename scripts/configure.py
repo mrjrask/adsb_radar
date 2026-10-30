@@ -4,6 +4,7 @@
 import argparse
 import getpass
 import json
+import os
 import secrets
 import sys
 from pathlib import Path
@@ -11,7 +12,18 @@ from pathlib import Path
 from werkzeug.security import generate_password_hash
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from adsb_radar.config import DEFAULTS, load_config, read_json, write_json  # noqa: E402
+from adsb_radar.config import DEFAULTS, load_config, read_json, tar1090_address, write_json  # noqa: E402
+
+
+def prompt_feed():
+    source = input("Feed source [tar1090/receivers] (tar1090): ").strip().lower() or "tar1090"
+    if source == "tar1090":
+        address = input("Combined tar1090 hostname or map address (e.g. cm5:8080): ")
+        return [tar1090_address(address)]
+    if source == "receivers":
+        return [url.strip() for url in input(
+            "Receiver URL(s), comma separated (e.g. http://192.168.1.50): ").split(",") if url.strip()]
+    raise ValueError("Feed source must be tar1090 or receivers")
 
 
 def main():
@@ -20,22 +32,30 @@ def main():
     parser.add_argument("--seed", type=Path)
     parser.add_argument("--check", action="store_true")
     parser.add_argument("--reset-password", action="store_true")
+    parser.add_argument("--tar1090", metavar="ADDRESS", help="use one combined tar1090 host/map instead of individual receivers")
     args = parser.parse_args()
     if args.check:
         load_config(args.destination)
         print("Configuration is valid.")
         return
-    if args.destination.exists() and not args.reset_password:
+    if args.destination.exists() and not args.reset_password and args.tar1090 is None:
         load_config(args.destination)
         print("Keeping existing configuration and admin credentials.")
         return
-    value = {**DEFAULTS, **read_json(args.destination if args.reset_password else args.seed)} if (
-        args.reset_password or args.seed) else dict(DEFAULTS)
-    if not args.seed and not args.reset_password:
+    previous = args.destination.stat() if args.destination.exists() else None
+    if previous:
+        value = {**DEFAULTS, **read_json(args.destination)}
+    elif args.seed:
+        value = {**DEFAULTS, **read_json(args.seed)}
+    else:
+        value = dict(DEFAULTS)
+    if args.tar1090 is not None:
+        value["RECEIVER_URLS"] = [tar1090_address(args.tar1090)]
+    if not previous and not args.seed:
         if not sys.stdin.isatty():
             parser.error("First install needs a terminal or --config FILE with preseeded settings")
-        value["RECEIVER_URLS"] = [url.strip() for url in input(
-            "ADS-B receiver URL(s), comma separated (e.g. http://192.168.1.50): ").split(",") if url.strip()]
+        if args.tar1090 is None:
+            value["RECEIVER_URLS"] = prompt_feed()
         value["LATITUDE"] = float(input("Display latitude: "))
         value["LONGITUDE"] = float(input("Display longitude: "))
         value["RESOLUTION"] = input("HDMI resolution [auto/4k/1080p/848x480] (auto): ").strip().lower() or "auto"
@@ -58,6 +78,8 @@ def main():
         write_json(temporary, value)
         load_config(temporary)
         write_json(args.destination, value)
+        if previous:
+            os.chown(args.destination, previous.st_uid, previous.st_gid)
     finally:
         temporary.unlink(missing_ok=True)
     print("Configuration saved. Admin user: " + value["ADMIN_USERNAME"])

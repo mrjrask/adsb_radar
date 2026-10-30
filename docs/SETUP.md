@@ -12,8 +12,15 @@ add a desktop or change `/boot/firmware/config.txt` or `cmdline.txt`.
 If you started from a desktop image, switch to console boot with
 `sudo raspi-config` and reboot before installation.
 
-The Pi must reach a receiver such as PiAware, dump1090-fa, readsb, or tar1090.
-Supply either its base URL (`http://192.168.1.50`) or the complete URL of
+The Pi must reach a source of current aircraft positions. For a combined
+**tar1090** instance on another computer (such as a CM5 combining two PiAware
+receivers), choose `tar1090` in the installer and enter its normal map address.
+A host/IP plus port, such as `192.0.2.10:8080`, is also accepted. Keep the port
+and any custom instance path; the app reads the aircraft feed below that map.
+The example IP is a placeholder: use the address you open in your browser.
+
+For individual receivers, choose `receivers` instead.
+Supply either a base URL (`http://192.168.1.50`) or the complete URL of
 `aircraft.json`. The client tries these paths for a base URL, then remembers
 the working one:
 
@@ -22,8 +29,13 @@ the working one:
 3. `/skyaware/data/aircraft.json`
 4. `/dump1090-fa/data/aircraft.json`
 
-One through eight receivers can be configured. A partial receiver outage
-does not stop another receiver's data from being displayed.
+A combined source is one entry in `RECEIVER_URLS` and contains all the traffic
+from its upstream receivers. Do not also list the individual PiAware sources
+unless you intentionally want to poll them too. The app labels endpoint
+counts as feeds, rather than pretending it can see upstream receiver health.
+
+One through eight feed endpoints can be configured. A partial endpoint outage
+does not stop another endpoint's data from being displayed.
 
 ## Installation choices
 
@@ -41,9 +53,34 @@ sudo systemctl disable --now getty@tty1
 sudo systemctl start adsb-radar-admin adsb-radar-display
 ```
 
-An install/update keeps `/etc/adsb-radar/config.json`, web settings, custom
+A normal install/update keeps `/etc/adsb-radar/config.json`, web settings, custom
 palettes, cached metadata, and existing installed images. It installs the
 current checkout; fetch changes with `git pull --ff-only` before updating.
+
+## Switch an existing display to the combined feed
+
+After pulling the latest code, run:
+
+```sh
+sudo ./install.sh --tar1090 '192.0.2.10:8080'
+```
+
+Replace the example with your combined tar1090 map address. This explicitly
+replaces `RECEIVER_URLS` with one entry and restarts the services. It preserves
+credentials, session key, location, web settings, and installed images.
+It does not change the CM5 or the PiAware receivers.
+
+You can also update just the installed configuration:
+
+```sh
+sudo python3 /opt/adsb-radar/scripts/configure.py /etc/adsb-radar/config.json --tar1090 '192.0.2.10:8080'
+sudo systemctl restart adsb-radar-display adsb-radar-admin
+```
+
+The configuration helper preserves the existing file owner/group so the
+service account can still read its private configuration. Direct JSON edits
+remain supported: `"RECEIVER_URLS": ["http://192.0.2.10:8080"]` selects the same
+combined source.
 
 ## Native resolution
 
@@ -107,7 +144,7 @@ Important settings:
 
 | Setting | Purpose |
 | --- | --- |
-| `RECEIVER_URLS` | List of 1–8 base URLs or complete `aircraft.json` URLs. |
+| `RECEIVER_URLS` | One combined tar1090 map/base address, or 1–8 receiver/feed URLs. |
 | `LATITUDE`, `LONGITUDE` | Where overhead is; enter both. Editable in the admin page. |
 | `DISTANCE_UNIT` | `nm`, `mi`, or `km`; all ranges use this unit. |
 | `RADIUS` | Ground-distance threshold for the flight board, default 3. |

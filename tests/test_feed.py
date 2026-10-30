@@ -84,3 +84,41 @@ def test_multiple_receivers_deduplicate_and_tolerate_partial_outage(config, tmp_
     assert len(result["aircraft"]) == 1
     assert result["aircraft"][0].device == "2"
     assert result["healthy_receivers"] == 2 and result["failures"] == 0
+
+
+@pytest.mark.parametrize("prefix", ["", "/tar1090", "/combo"])
+def test_combined_tar1090_feed_uses_selected_instance_and_contains_both_receivers(config, tmp_path, prefix):
+    paths = []
+    endpoint = prefix + "/data/aircraft.json"
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_GET(self):
+            paths.append(self.path)
+            if self.path != endpoint:
+                self.send_response(404)
+                self.end_headers()
+                return
+            merged = payload(now=time.time())
+            merged["aircraft"].append({**merged["aircraft"][0], "hex": "b23456", "flight": "UAL456"})
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(json.dumps(merged).encode())
+
+        def log_message(self, *_args):
+            pass
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    source = f"http://127.0.0.1:{server.server_port}{prefix}"
+    poller = Poller({**config, "RECEIVER_URLS": [source]}, tmp_path)
+    try:
+        poller.start()
+        result = poller.results.get(timeout=5)
+        assert {a.callsign for a in result["aircraft"]} == {"DAL123", "UAL456"}
+        assert result["healthy_receivers"] == 1
+        assert paths == [endpoint]
+    finally:
+        poller.stopping.set()
+        poller.join(timeout=2)
+        server.shutdown()
+        server.server_close()

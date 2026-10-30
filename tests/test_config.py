@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 from werkzeug.security import check_password_hash
 
-from adsb_radar.config import check_settings, display_settings, load_config, read_json, write_json
+from adsb_radar.config import check_settings, display_settings, load_config, read_json, tar1090_address, write_json
 
 
 def test_config_bootstrap_and_reinstall_preserve_credentials(tmp_path):
@@ -61,3 +61,48 @@ def test_bad_settings_are_reported_instead_of_silently_discarded(tmp_path):
     path.write_text("broken")
     with pytest.raises(ValueError):
         read_json(path)
+
+
+@pytest.mark.parametrize("address,expected", [
+    ("cm5", "http://cm5"),
+    ("192.0.2.10:8080", "http://192.0.2.10:8080"),
+    ("http://192.0.2.10:8080/", "http://192.0.2.10:8080"),
+    ("https://cm5/combo/index.html?lat=41&lon=-87#map", "https://cm5/combo"),
+    ("http://cm5/tar1090/", "http://cm5/tar1090"),
+    ("http://cm5/data/aircraft.json", "http://cm5/data/aircraft.json"),
+])
+def test_tar1090_accepts_host_port_and_map_addresses(address, expected):
+    assert tar1090_address(address) == expected
+
+
+@pytest.mark.parametrize("address", ["", "file:///tmp/planes", "http://user:password@cm5", "http://cm5:bad", "cm5:99999", "cm 5"])
+def test_tar1090_rejects_invalid_addresses(address):
+    with pytest.raises(ValueError):
+        tar1090_address(address)
+
+
+def test_switch_existing_config_to_combined_feed_preserves_credentials(config, tmp_path):
+    path = tmp_path / "config.json"
+    write_json(path, {**config, "RECEIVER_URLS": ["http://receiver1", "http://receiver2"]})
+    write_json(tmp_path / "settings.json", {"RADIUS": 7})
+    original = path.stat()
+    result = subprocess.run([sys.executable, str(Path(__file__).parents[1] / "scripts/configure.py"),
+                             str(path), "--tar1090", "192.0.2.10:8080"], capture_output=True, text=True, check=True)
+    value = load_config(path)
+    assert value["RECEIVER_URLS"] == ["http://192.0.2.10:8080"]
+    assert value["ADMIN_PASSWORD_HASH"] == config["ADMIN_PASSWORD_HASH"]
+    assert value["SECRET_KEY"] == config["SECRET_KEY"]
+    assert value["LATITUDE"] == config["LATITUDE"]
+    assert read_json(tmp_path / "settings.json") == {"RADIUS": 7}
+    assert (path.stat().st_uid, path.stat().st_gid) == (original.st_uid, original.st_gid)
+    assert "Generated admin password" not in result.stdout
+
+
+def test_first_install_tar1090_prompt_accepts_host_port(monkeypatch):
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("configure_script", Path(__file__).parents[1] / "scripts/configure.py")
+    script = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(script)
+    answers = iter(["", "192.0.2.10:8080"])
+    monkeypatch.setattr("builtins.input", lambda _prompt: next(answers))
+    assert script.prompt_feed() == ["http://192.0.2.10:8080"]

@@ -5,7 +5,7 @@ import math
 import os
 import tempfile
 from pathlib import Path
-from urllib.parse import urlsplit
+from urllib.parse import urlsplit, urlunsplit
 
 from .forms import FIELDS, SECTORS
 
@@ -20,6 +20,29 @@ DEFAULTS = {
     "RADIUS": 3, "RADAR_RANGE": 12, "IDLE": "radar", "IDLE_SECONDS": 30,
     "ROUTE_LOOKUP": True, "TYPE_LOOKUP": True,
 }
+
+
+def tar1090_address(address):
+    """Accept a host:port or map address; retain the instance path and port.
+
+    Viewport queries/fragments and index.html belong to the map UI, not the
+    aircraft feed. Receiver discovers data/aircraft.json below this base.
+    """
+    address = address.strip()
+    if not address:
+        raise ValueError("Enter the tar1090 hostname or map address")
+    if "://" not in address:
+        address = "http://" + address
+    url = urlsplit(address)
+    if (url.scheme not in ("http", "https") or not url.hostname or url.username or url.password
+            or any(ord(c) <= 32 for c in address)):
+        raise ValueError("Use a tar1090 http(s) address without credentials or spaces")
+    # Accessing port validates malformed/non-numeric/out-of-range port values.
+    _port = url.port
+    path = url.path.rstrip("/")
+    if path.rsplit("/", 1)[-1] in ("index.html", "index.htm"):
+        path = path.rsplit("/", 1)[0]
+    return urlunsplit((url.scheme, url.netloc, path, "", ""))
 
 
 def read_json(path, default=None):

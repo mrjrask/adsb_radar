@@ -4,7 +4,7 @@ A standalone **Raspberry Pi 4 HDMI flight board and animated radar**, designed
 for **Raspberry Pi OS Trixie Lite**. It runs straight from the Linux console
 with SDL2 KMS/DRM. No desktop, browser kiosk, X11, or Wayland session is needed.
 
-It reads your existing dump1090/readsb/PiAware/tar1090 receiver over the network.
+It reads your combined tar1090 feed or individual dump1090/readsb/PiAware receivers over the network.
 It does **not** require a Desk Display server. The high resolution flight
 layout, aircraft illustration fallback, airline directory, and visibility
 cone are adapted from [desk_display](https://github.com/mrjrask/desk_display).
@@ -34,7 +34,7 @@ planes hidden by trees or buildings.
 
 Start with a network-connected Pi 4 running **Raspberry Pi OS Trixie Lite**
 (64-bit recommended), with SSH enabled and the HDMI display attached and on.
-Have your receiver's URL and the display's latitude/longitude ready.
+Have your tar1090 map address (or receiver URLs) and the display's latitude/longitude ready.
 
 ```sh
 sudo apt-get update
@@ -44,7 +44,9 @@ cd adsb_radar
 sudo ./install.sh
 ```
 
-The installer asks for receiver URL(s), location, output resolution, and an
+The installer defaults to a **combined tar1090 feed** and accepts its hostname,
+IP address with port, or normal map URL. It also offers individual receivers.
+It asks for the display location, output resolution, and an
 admin password (or generates one). It installs every runtime dependency,
 creates an unprivileged service account, installs the app in
 `/opt/adsb-radar`, and enables separate display and web services at boot.
@@ -64,6 +66,29 @@ and run `sudo ./install.sh --config /path/to/config.json`. A missing password
 is generated. The seed file only applies on first installation. See
 [the setup guide](docs/SETUP.md) for configuration, projector mode selection,
 troubleshooting, and password resets.
+
+## Use a combined tar1090 feed
+
+If another computer combines your PiAware feeds and serves tar1090, choose
+**tar1090** during setup and enter that computer's **map address**, including
+its port if needed. For example, `192.0.2.10:8080` or
+`http://192.0.2.10:8080/` (replace this example address with yours).
+The app discovers `data/aircraft.json`; you do not need to enter that endpoint
+or list the two PiAware receivers separately.
+
+To switch an existing installation to the combined feed:
+
+```sh
+git pull --ff-only
+sudo ./install.sh --tar1090 '192.0.2.10:8080'
+```
+
+This replaces the feed list with that one combined source and preserves
+location, admin credentials, palettes, and artwork. A custom tar1090 instance
+path such as `http://host:8080/combo/` is retained. Map viewport query strings
+and `index.html` are removed. The admin page shows the configured feed address;
+its online count refers to feed endpoints, so one aggregator is **one feed**
+even when it combines multiple receivers.
 
 ## Upload the artwork manually
 

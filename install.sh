@@ -4,20 +4,23 @@ set -euo pipefail
 
 usage() {
     cat <<'EOF'
-Usage: sudo ./install.sh [--config /path/to/config.json] [--no-start]
+Usage: sudo ./install.sh [--config /path/to/config.json] [--tar1090 ADDRESS] [--no-start]
 
 Installs OS dependencies, code, artwork you supplied, and two systemd services.
 Existing /etc/adsb-radar/config.json and saved palettes are preserved.
 --config FILE  Seed the first installation (does not replace an existing config).
+--tar1090 HOST Use a combined tar1090 host:port or map address (also updates an existing installation).
 --no-start     Stage the installation without taking tty1 or starting services.
 EOF
 }
 
 seed=""
+tar1090=""
 start=1
 while (($#)); do
     case "$1" in
         --config) [[ $# -ge 2 ]] || { usage; exit 2; }; seed="$2"; shift 2 ;;
+        --tar1090) [[ $# -ge 2 && -n $2 ]] || { usage; exit 2; }; tar1090="$2"; shift 2 ;;
         --no-start) start=0; shift ;;
         -h|--help) usage; exit 0 ;;
         *) usage; exit 2 ;;
@@ -88,6 +91,7 @@ fi
 
 configure_args=(/etc/adsb-radar/config.json)
 [[ -z $seed ]] || configure_args+=(--seed "$seed")
+[[ -z $tar1090 ]] || configure_args+=(--tar1090 "$tar1090")
 python3 "$source_dir/scripts/configure.py" "${configure_args[@]}"
 chown root:adsb-radar /etc/adsb-radar/config.json
 chmod 0640 /etc/adsb-radar/config.json
