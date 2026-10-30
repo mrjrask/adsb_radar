@@ -43,6 +43,8 @@ class FlightRoute:
     destination: Optional[Airport]
     # Every stop of a multi-leg flight number, in order (empty for one leg).
     stops: tuple[Airport, ...] = ()
+    # Marketed flights this route was found under ("UAL5432" for SKW5432).
+    codeshares: tuple[str, ...] = ()
 
     def to_json(self) -> str:
         return json.dumps(asdict(self), sort_keys=True)
@@ -61,6 +63,7 @@ class FlightRoute:
                 origin=_airport_from_dict(data.get("origin")),
                 destination=_airport_from_dict(data.get("destination")),
                 stops=tuple(a for a in map(_airport_from_dict, data.get("stops") or ()) if a is not None),
+                codeshares=tuple(str(c).strip().upper() for c in data.get("codeshares") or () if c),
             )
         except (TypeError, ValueError, AttributeError):
             return None
