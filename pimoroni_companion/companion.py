@@ -39,37 +39,73 @@ def live_snapshot(data, now):
                                 if 0 <= now - a["seen_at"] <= 30]}
 
 
-def render(data, now):
+def hidden_columns(config, side):
+    value = config.get(f"{side}_hidden_columns", 32)
+    if type(value) is not int or not 0 <= value <= 48:
+        raise ValueError(f"{side}_hidden_columns must be an integer from 0 to 48")
+    return value
+
+
+def oled_panel(hidden, side, now):
+    """Reserve the inner edge; keep a dark eight-pixel viewing-angle margin."""
+    panel = Image.new("1", (128, 128))
+    draw = ImageDraw.Draw(panel)
+    pattern_width = max(0, hidden - 8)
+    start = 128 - pattern_width if side == "left" else 0
+    phase = int(now) % 2
+    for x in range(start, start + pattern_width):
+        for y in range(128):
+            if (x + y + phase) % 2 == 0:
+                draw.point((x, y), fill=1)
+    return panel
+
+
+def render(data, now, config=None):
     data = live_snapshot(data, now)
     planes = data.get("aircraft", [])
     target = next((a for a in planes if a["hex"] == data.get("selected")), None)
-    left, lcd, right = Image.new("1", (128, 128)), Image.new("RGB", (240, 240)), Image.new("1", (128, 128))
+    config = config or {}
+    left_hidden = hidden_columns(config, "left")
+    right_hidden = hidden_columns(config, "right")
+    left = Image.new("1", (128 - left_hidden, 128))
+    right = Image.new("1", (128 - right_hidden, 128))
+    lcd = Image.new("RGB", (240, 240))
     ld, cd, rd = ImageDraw.Draw(left), ImageDraw.Draw(lcd), ImageDraw.Draw(right)
+
+    def oled_label(draw, xy, value, size=12):
+        width = left.width if draw is ld else right.width
+        text = str(value)
+        available = width - xy[0] - 4
+        while size > 8 and draw.textlength(text, font=font(size)) > available:
+            size -= 1
+        while text and draw.textlength(text, font=font(size)) > available:
+            text = text[:-1]
+        draw.text(xy, text, font=font(size), fill="white")
     # Two-pixel slow movement reduces persistent OLED wear without scrolling text.
     shift = int(now // 30) % 3
-    label(ld, (5 + shift, 4), "FLIGHT DECK", 12)
-    label(rd, (5 + shift, 4), "TELEMETRY", 12)
-    for draw in (ld, rd):
-        draw.line((5, 23, 121, 23), fill="white")
+    oled_label(ld, (5 + shift, 4), "FLIGHT DECK", 12)
+    oled_label(rd, (5 + shift, 4), "TELEMETRY", 12)
+    for draw, width in ((ld, left.width), (rd, right.width)):
+        draw.line((5, 23, width - 7, 23), fill="white")
     if target:
-        label(ld, (5 + shift, 31), target.get("callsign") or target["hex"].upper(), 20)
-        label(ld, (5 + shift, 60), target.get("aircraft_type") or "TYPE --", 17)
-        label(ld, (5 + shift, 86), f'{target["distance"]:.1f} {data["unit"]}', 17)
-        label(ld, (5 + shift, 110), f'BRG {target["bearing"]:03.0f} deg', 11)
+        oled_label(ld, (5 + shift, 31), target.get("callsign") or target["hex"].upper(), 20)
+        oled_label(ld, (5 + shift, 60), target.get("aircraft_type") or "TYPE --", 17)
+        oled_label(ld, (5 + shift, 86), f'{target["distance"]:.1f} {data["unit"]}', 17)
+        oled_label(ld, (5 + shift, 110), f'BRG {target["bearing"]:03.0f} deg', 11)
         alt, speed, rate = (target.get(k) for k in ("altitude_ft", "ground_speed_kt", "vertical_rate_fpm"))
-        label(rd, (5 + shift, 30), f'{alt:,} FT' if alt is not None else "ALT --", 18)
-        label(rd, (5 + shift, 59), f'{speed:.0f} KT' if speed is not None else "SPD --", 20)
-        label(rd, (5 + shift, 89), f'{rate:+,} FPM' if rate is not None else "V/S --", 12)
+        oled_label(rd, (5 + shift, 30), f'{alt:,} FT' if alt is not None else "ALT --", 18)
+        oled_label(rd, (5 + shift, 59), f'{speed:.0f} KT' if speed is not None else "SPD --", 20)
+        oled_label(rd, (5 + shift, 89), f'{rate:+,} FPM' if rate is not None else "V/S --", 12)
         # Altitude tape: 0-40,000 feet.
-        rd.rectangle((5, 115, 121, 121), outline="white")
-        rd.rectangle((6, 116, 6 + int(114 * min(1, max(0, (alt or 0) / 40000))), 120), fill="white")
+        rd.rectangle((5, 115, right.width - 7, 121), outline="white")
+        rd.rectangle((6, 116, 6 + int((right.width - 14) * min(1, max(0, (alt or 0) / 40000))), 120), fill="white")
     else:
-        label(ld, (5 + shift, 35), "SCANNING" if data.get("online") else "NO SIGNAL", 17)
-        label(ld, (5 + shift, 67), f"{len(planes)} TRACKS", 16)
-        label(ld, (5 + shift, 105), "HDMI COMPANION", 10)
-        label(rd, (5 + shift, 36), datetime.fromtimestamp(now).strftime("%H:%M:%S"), 20)
-        label(rd, (5 + shift, 75), "AIRSPACE LIVE" if data.get("online") else "CHECK HDMI", 12)
-        label(rd, (5 + shift, 104), "NORTH UP", 12)
+        oled_label(ld, (5 + shift, 35), "SCANNING" if data.get("online") else "NO SIGNAL", 17)
+        oled_label(ld, (5 + shift, 67), f"{len(planes)} TRACKS", 16)
+        oled_label(ld, (5 + shift, 105), "HDMI COMPANION", 10)
+        oled_label(rd, (5 + shift, 36), datetime.fromtimestamp(now).strftime("%H:%M:%S"), 20)
+        oled_label(rd, (5 + shift, 75), "AIRSPACE LIVE" if data.get("online") else "CHECK HDMI", 12)
+        oled_label(rd, (5 + shift, 104), "NORTH UP", 12)
     green, dim, amber = "#53ffb2", "#164936", "#ffcf65"
     label(cd, (120, 3), "LOCAL AIRSPACE", 14, green, "mt")
     cx, cy, radius = 120, 122, 89
@@ -98,7 +134,11 @@ def render(data, now):
         footer = "FEED UNAVAILABLE"
     cd.polygon(((120, 117), (116, 127), (124, 127)), fill="white")
     label(cd, (120, 223), footer, 12, green, "mt")
-    return left, lcd, right
+    left_panel = oled_panel(left_hidden, "left", now)
+    right_panel = oled_panel(right_hidden, "right", now)
+    left_panel.paste(left, (0, 0))
+    right_panel.paste(right, (right_hidden, 0))
+    return left_panel, lcd, right_panel
 
 
 class Hardware:
@@ -159,6 +199,11 @@ def main():
         parser.error("OLED rotations must be 0, 1, 2 or 3")
     if config["lcd_rotation"] not in (0, 90, 180, 270):
         parser.error("LCD rotation must be 0, 90, 180 or 270")
+    try:
+        for side in ("left", "right"):
+            hidden_columns(config, side)
+    except ValueError as exc:
+        parser.error(str(exc))
     stopping = threading.Event()
     for sig in (signal.SIGINT, signal.SIGTERM):
         signal.signal(sig, lambda *_: stopping.set())
@@ -170,7 +215,7 @@ def main():
                 data = json.loads(args.snapshot.read_text())
             except (OSError, ValueError):
                 data = {}
-            images = render(data, time.time())
+            images = render(data, time.time(), config)
             level = max(0.01, min(1, data.get("brightness", 0.4)))
             hardware.present(images, level)
             stopping.wait(max(0.01, 0.5 - (time.monotonic() - started)))

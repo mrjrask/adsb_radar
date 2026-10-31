@@ -3,5 +3,7 @@
   "right_address": "0x3d",
   "left_rotation": 0,
   "right_rotation": 0,
-  "lcd_rotation": 90
+  "lcd_rotation": 90,
+  "left_hidden_columns": 32,
+  "right_hidden_columns": 32
 }

@@ -14,6 +14,15 @@ The HDMI process publishes an atomic snapshot once a second. This service reads
 it at two frames per second, makes no network requests and never takes over HDMI.
 It shares the HDMI radar range, distance units and brightness. Positions expire
 after 30 seconds; a missing/old HDMI heartbeat or offline feed shows NO SIGNAL.
+The default OLED layout reserves the inner 32 columns on each panel for the
+center LCD overlap: x=96–127 on the left and x=0–31 on the right. Text fits the
+remaining 96-column area. The innermost 24 columns alternate complementary
+checkerboards once a second; eight columns remain dark as a viewing-angle margin.
+This gives each patterned pixel 50% on-time, but does not match the variable wear
+of visible content or repair burn-in. Adjust `left_hidden_columns` and
+`right_hidden_columns` independently (0–48, default 32) in companion.json; use 0
+for an unobstructed panel. These coordinates follow the configured OLED rotation.
+
 OLED text shifts slowly by two pixels to reduce persistent wear; it does not
 eliminate burn-in. Stop the service when the displays are not needed.
 
