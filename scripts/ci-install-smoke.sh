@@ -36,6 +36,16 @@ bash install.sh --no-start
 test "$before" = "$(sha256sum /etc/adsb-radar/config.json)"
 test -f /var/lib/adsb-radar/presets.json
 test -f /var/lib/adsb-radar/images/air/local-upload.txt
+# The runtime-only updater must not call systemctl at all.
+calls_before=$(wc -l < /tmp/systemctl-calls)
+printf 'outdated runtime sentinel\\n' > /opt/adsb-radar/adsb_radar/obsolete-update-test.txt
+bash update.sh
+test "$calls_before" = "$(wc -l < /tmp/systemctl-calls)"
+test ! -e /opt/adsb-radar/adsb_radar/obsolete-update-test.txt
+cmp adsb_radar/display.py /opt/adsb-radar/adsb_radar/display.py
+test "$before" = "$(sha256sum /etc/adsb-radar/config.json)"
+test -f /var/lib/adsb-radar/presets.json
+test -f /var/lib/adsb-radar/images/air/local-upload.txt
 PYTHONDONTWRITEBYTECODE=1 runuser -u adsb-radar -- sh -c 'cd /opt/adsb-radar && exec /usr/bin/python3 -' <<'PY'
 from adsb_radar.config import load_config
 from adsb_radar.web import create_app

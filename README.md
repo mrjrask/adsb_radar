@@ -70,6 +70,25 @@ is generated. The seed file only applies on first installation. See
 [the setup guide](docs/SETUP.md) for configuration, projector mode selection,
 troubleshooting, and password resets.
 
+## Update without restarting services
+
+From your repository checkout:
+
+```sh
+git pull --ff-only
+sudo bash ./update.sh
+```
+
+This updates the installed main application's runtime files and supplied artwork.
+It preserves configuration, credentials, presets, uploaded artwork, and service
+states. It never controls any service, including the optional companion, and
+does not run apt, pip, or the installer. The companion's own code is not updated.
+Running Python processes fully load the new code on a later manual restart;
+static files and artwork can become visible immediately. An update across
+multiple files is not an atomic application release.
+Dependency and systemd unit changes require a separate maintenance installation
+with `install.sh`, which stops services even with `--no-start`.
+
 ## Use a combined tar1090 feed
 
 If another computer combines your PiAware feeds and serves tar1090, choose
