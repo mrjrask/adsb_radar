@@ -1,10 +1,12 @@
 """Authenticated admin page, independent of the HDMI renderer."""
 
 import fcntl
+import json
 import secrets
+import sqlite3
 import threading
 import time
-from contextlib import contextmanager
+from contextlib import closing, contextmanager
 from datetime import timedelta
 from pathlib import Path
 
@@ -112,6 +114,15 @@ def create_app(config_path=CONFIG_PATH, state_path=STATE_PATH, config=None):
 
     def status():
         result = read_json(state / "status.json")
+        database = state / "metadata.db"
+        if database.is_file():
+            try:
+                with closing(sqlite3.connect(f"file:{database}?mode=ro", uri=True, timeout=1)) as connection:
+                    row = connection.execute("SELECT value FROM meta WHERE key='route_diagnostics'").fetchone()
+                if row:
+                    result["routes"] = json.loads(row[0])
+            except (sqlite3.Error, ValueError):
+                pass
         age = time.time() - result.get("heartbeat", 0)
         return {**result, "renderer_alive": 0 <= age < 10 and result.get("state") != "stopped",
                 "heartbeat_age_seconds": round(age) if result else None}
