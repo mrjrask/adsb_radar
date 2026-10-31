@@ -178,3 +178,9 @@ purge. Hardware HDMI/EDID behavior and sustained frame rate still need a
 physical Pi/projector acceptance check; container tests cannot prove those.
 
 See [NOTICE.md](NOTICE.md) for source provenance and font/data attribution.
+
+### Optional three-screen Pimoroni flight deck
+
+See [pimoroni_companion/README.md](pimoroni_companion/README.md) for the standalone
+installer/uninstaller for two PIM374 OLEDs and one PIM576 color LCD on Breakout
+Garden Mini. Adds flight instruments and an animated radar alongside HDMI.

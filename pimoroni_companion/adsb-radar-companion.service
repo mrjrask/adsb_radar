@@ -1,0 +1,23 @@
+[Unit]
+Description=ADS-B Radar Pimoroni flight deck
+After=adsb-radar-display.service
+StartLimitIntervalSec=0
+
+[Service]
+User=adsb-radar
+Group=adsb-radar
+SupplementaryGroups=i2c spi gpio
+WorkingDirectory=/opt/adsb-radar-companion
+ExecStart=/opt/adsb-radar-companion/venv/bin/python companion.py
+Environment=PYTHONDONTWRITEBYTECODE=1
+Restart=on-failure
+RestartSec=10
+TimeoutStopSec=15
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+UMask=0027
+
+[Install]
+WantedBy=multi-user.target

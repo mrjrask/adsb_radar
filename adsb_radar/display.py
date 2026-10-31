@@ -7,6 +7,7 @@ import os
 import queue
 import signal
 import time
+from dataclasses import asdict
 from pathlib import Path
 
 from PIL import ImageEnhance
@@ -126,6 +127,20 @@ def run(config, state, *, windowed=False, demo=None, frames=None, output=None):
                 stats["effective"]["RADAR_RANGE"] = max(settings["RADIUS"], settings["RADAR_RANGE"])
                 stats["effective"]["unit"] = settings["DISTANCE_UNIT"]
                 write_json(Path(state) / "status.json", stats)
+                # Hardware companions consume a bounded, atomic snapshot; they never
+                # poll receivers or open the HDMI device themselves.
+                try:
+                    write_json(Path(state) / "companion.json", {
+                        "heartbeat": now, "online": online, "selected": scene.keep,
+                        "unit": settings["DISTANCE_UNIT"],
+                        "range": max(settings["RADIUS"], settings["RADAR_RANGE"]),
+                        "brightness": level,
+                        "aircraft": [asdict(a) for a in sorted(
+                            (a for a in aircraft if now - a.seen_at <= 30),
+                            key=lambda a: (a.hex != scene.keep, a.distance))[:256]],
+                    })
+                except OSError:
+                    LOG.warning("Unable to publish companion snapshot", exc_info=True)
                 preview = ImageEnhance.Brightness(image).enhance(level) if level < 1 else image.copy()
                 preview.thumbnail((960, 540))
                 output = io.BytesIO()
