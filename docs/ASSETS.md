@@ -58,3 +58,20 @@ rerun the installer, the admin page's copy leaves them out straight away, and
 the display drops their rows from the file when it restarts (the installer
 restarts it), so the log stays a to-do list. Demo mode logs nothing.
 
+### Drafting missing artwork with Draw Things
+
+On a Mac with Draw Things, turn on its API Server (Settings → API Server, HTTP,
+port 7860), copy the log from the admin page and run:
+
+```sh
+pbpaste | python3 scripts/generate_missing_imagery.py
+```
+
+It saves each file under `~/Desktop/missing_imagery/` at the log's path
+(`air/DAL.png`, `aircraft/DAL/B738.png`) with the background removed and sized
+for the display. AI art gets logos and liveries only roughly right, so review
+each one before copying it into `images/` and rerunning the installer.
+`--variants 3` makes three to choose from, `--name CODE=Name` names an airline
+the log has no name for, `--flip` mirrors aircraft drawn nose left, and
+`--dry-run` shows the prompts. It needs only Python 3 and Pillow.
+
