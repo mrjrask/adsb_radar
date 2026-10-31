@@ -27,8 +27,8 @@ jobs:
         run: |
           ruff check .
           node --check adsb_radar/static/admin.js
-          shellcheck install.sh uninstall.sh scripts/*.sh
-          bash -n install.sh uninstall.sh scripts/*.sh
+          shellcheck install.sh uninstall.sh scripts/*.sh pimoroni_companion/*.sh
+          bash -n install.sh uninstall.sh scripts/*.sh pimoroni_companion/*.sh
       - name: Test rendering, receiver polling, authentication, and settings
         env:
           SDL_VIDEODRIVER: dummy

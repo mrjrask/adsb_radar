@@ -17,5 +17,9 @@ def test_real_pygame_render_loop_and_shutdown(tmp_path, mode, profile, expected)
     status = json.loads((tmp_path / "status.json").read_text())
     assert status["state"] == "stopped" and status["driver"] == "dummy"
     assert status["render_size"] == expected
+    companion = json.loads((tmp_path / "companion.json").read_text())
+    assert companion["online"] is True
+    assert companion["selected"] == ("a12345" if mode == "flight" else None)
+    assert companion["aircraft"][0]["hex"] == "a12345"
     with Image.open(tmp_path / "preview.png") as image:
         assert image.size == ((848, 480) if profile == "848x480" else (960, 540))
