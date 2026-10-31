@@ -94,3 +94,13 @@ def test_logout_and_output_escaping(client):
     assert b"<script>alert" not in client.get("/?message=<script>alert(1)</script>").data
     assert client.post("/logout", data={"csrf": token}).status_code == 303
     assert client.get("/status.json").status_code == 401
+
+
+def test_route_diagnostics_are_authenticated_and_read_from_local_cache(client, tmp_path):
+    from adsb_radar.metadata import Metadata
+
+    Metadata(tmp_path).store_route_diagnostics({"eligible": 10, "matched": 7, "coverage_percent": 70})
+    assert client.get("/status.json").status_code == 401
+    login(client)
+    assert client.get("/status.json").get_json()["routes"]["coverage_percent"] == 70
+    assert b"coverage_percent" in client.get("/").data

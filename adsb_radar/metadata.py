@@ -2,10 +2,12 @@
 
 import gzip
 import io
+import json
 import logging
 import queue
 import re
 import sqlite3
+import sys
 import threading
 import time
 from dataclasses import replace
@@ -13,11 +15,68 @@ from pathlib import Path
 
 import requests
 
-from . import codeshares, flight_routes
+from . import flight_routes
+from .route_enrichment import STALE_ROUTE_SECONDS, RouteEnricher, normalize_callsign
 
 LOG = logging.getLogger(__name__)
 TYPE_URL = "https://raw.githubusercontent.com/wiedehopf/tar1090-db/csv/aircraft.csv.gz"
-ROUTE_URL = "https://api.adsbdb.com/v0/callsign/{}"
+ROUTE_URL = "https://api.adsbdb.com/v0/callsign/{callsign}"
+ROUTESET_URL = "https://api.adsb.lol/api/0/routeset"
+VRS_URL = "https://vrs-standing-data.adsb.lol/routes/{prefix}/{callsign}.json"
+
+
+# Transport adapters share the validated parsers used by the renderer.
+FlightRoute = flight_routes.FlightRoute
+fitting_route = flight_routes.fitting_route
+
+
+def fetch_route(callsign, *, url_template, timeout):
+    return _fetch(callsign, url_template.format(callsign=callsign), timeout, "adsbdb")
+
+
+def fetch_vrs_route(callsign, *, url_template, timeout):
+    return _fetch(callsign, url_template.format(prefix=callsign[:2], callsign=callsign), timeout, "vrs")
+
+
+def _fetch(callsign, url, timeout, source):
+    with requests.get(url, timeout=(3, timeout), allow_redirects=False,
+                      headers={"User-Agent": "adsb_radar route lookup"}) as response:
+        if response.status_code == 404:
+            return True, None
+        if response.status_code != 200:
+            LOG.info("Route provider %s for %s: HTTP %s", source, callsign, response.status_code)
+            return False, None
+        payload = response.json()
+        if source == "adsbdb":
+            route = flight_routes.parse_adsbdb(payload, callsign)
+        else:
+            route = flight_routes.parse_routeset_item(payload)
+        if route is None or normalize_callsign(route.callsign) != callsign:
+            return False, None
+        return True, route
+
+
+def fetch_routeset(planes, *, url, timeout):
+    body = {"planes": [{"callsign": c, "lat": lat, "lng": lon} for c, lat, lon in planes]}
+    with requests.post(url, json=body, timeout=(3, timeout), allow_redirects=False,
+                       headers={"User-Agent": "adsb_radar route lookup"}) as response:
+        if response.status_code != 200:
+            return False, {}
+        payload = response.json()
+    if not isinstance(payload, list):
+        return False, {}
+    expected = {p[0] for p in planes}
+    result = {}
+    for item in payload:
+        if not isinstance(item, dict):
+            continue
+        callsign = normalize_callsign(item.get("callsign"))
+        if callsign not in expected:
+            continue
+        route = flight_routes.parse_routeset_item(item)
+        if route or item.get("airport_codes") == "unknown":
+            result[callsign] = route
+    return True, result
 
 
 class Metadata:
@@ -30,6 +89,25 @@ class Metadata:
                 CREATE TABLE IF NOT EXISTS routes (callsign TEXT PRIMARY KEY, payload TEXT, updated REAL);
                 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value REAL);
             """)
+
+        self.routes = RouteEnricher(self, sys.modules[__name__], url_template=ROUTE_URL,
+                                    routeset_url=ROUTESET_URL, vrs_url=VRS_URL)
+
+    def cached_route(self, callsign):
+        with self.connect() as connection:
+            row = connection.execute("SELECT payload,updated FROM routes WHERE callsign=?", (callsign,)).fetchone()
+        return (True, row[0], row[1]) if row else (False, None, None)
+
+    def store_route(self, callsign, payload, *, now):
+        with self.connect() as connection:
+            connection.execute("INSERT OR REPLACE INTO routes VALUES (?,?,?)", (callsign, payload, now))
+            connection.commit()
+
+    def store_route_diagnostics(self, diagnostics):
+        with self.connect() as connection:
+            connection.execute("INSERT OR REPLACE INTO meta VALUES ('route_diagnostics',?)",
+                               (json.dumps(diagnostics),))
+            connection.commit()
 
     def connect(self):
         # Explicitly close after each use: sqlite's context manager only commits/rolls back.
@@ -45,75 +123,16 @@ class Metadata:
         return tuple(result)
 
     def route(self, aircraft):
-        with self.connect() as connection:
-            row = connection.execute("SELECT payload,updated FROM routes WHERE callsign=?", (aircraft.callsign,)).fetchone()
-        if not row or not row[0] or time.time() - row[1] > 86400:
+        _cached, payload, updated = self.cached_route(normalize_callsign(aircraft.callsign))
+        if not payload or updated is None or not 0 <= time.time() - updated < STALE_ROUTE_SECONDS:
             return None
-        route = flight_routes.FlightRoute.from_json(row[0])
-        return flight_routes.fitting_route(route, aircraft.latitude, aircraft.longitude, aircraft.altitude_ft) if route else None
-
-    def _fetch_route(self, callsign):
-        """``(answered, route)`` from adsbdb; ``(True, None)`` for an unknown callsign."""
-
-        with requests.get(ROUTE_URL.format(callsign), timeout=(3, 4), allow_redirects=False) as response:
-            if response.status_code not in (200, 404):
-                return False, None
-            return True, flight_routes.parse_adsbdb(response.json(), callsign) if response.status_code == 200 else None
+        route = flight_routes.FlightRoute.from_json(payload)
+        if route and route.codeshares and not route.source:
+            return None
+        return fitting_route(route, aircraft.latitude, aircraft.longitude, aircraft.altitude_ft) if route else None
 
     def update_route(self, plane):
-        if not flight_routes.is_flight_callsign(plane.callsign):
-            return
-        with self.connect() as connection:
-            row = connection.execute("SELECT payload,updated FROM routes WHERE callsign=?", (plane.callsign,)).fetchone()
-        if row and time.time() - row[1] < (86400 if row[0] else 3600):
-            return
-        try:
-            answered, route = self._fetch_route(plane.callsign)
-            if not answered:
-                return
-            route = self._with_codeshare(plane, route)
-            with self.connect() as connection:
-                connection.execute("INSERT OR REPLACE INTO routes VALUES (?,?,?)",
-                                   (plane.callsign, route.to_json() if route else None, time.time()))
-                connection.commit()
-        except (requests.RequestException, ValueError):
-            LOG.info("Route lookup unavailable; continuing with receiver data")
-
-    def _with_codeshare(self, plane, route):
-        """*route* with the marketed flight it is sold as, or a codeshare's route when *route* is no use.
-
-        A regional flight (SKW5432) is sold under a major airline's number
-        (UAL5432). The first codeshare whose route this aircraft can be flying,
-        and that agrees with its own route when it has one, is recorded; the
-        airline stays the operator's.
-        """
-
-        def leg(candidate):
-            if candidate is None:
-                return None
-            return flight_routes.fitting_route(candidate, plane.latitude, plane.longitude, plane.altitude_ft)
-
-        def ends(candidate):
-            return (candidate.origin.code if candidate.origin else "",
-                    candidate.destination.code if candidate.destination else "")
-
-        own = leg(route)
-        for partner in codeshares.codeshare_callsigns(plane.callsign):
-            try:
-                answered, other = self._fetch_route(partner)
-            except (requests.RequestException, ValueError):
-                answered = False
-            if not answered:
-                # Keep the operator's own answer rather than lose it to a failed extra lookup.
-                break
-            shared = leg(other)
-            if shared is None or (own is not None and ends(own) != ends(shared)):
-                continue
-            if own is not None:
-                return replace(route, codeshares=(partner,))
-            return replace(other, callsign=plane.callsign, airline_name="", airline_icao=plane.callsign[:3],
-                           airline_iata="", codeshares=(partner,))
-        return route
+        return self.routes.refresh_aircraft([plane])
 
     def update_types(self):
         with self.connect() as connection:
@@ -173,6 +192,8 @@ class MetadataWorker(threading.Thread):
             except queue.Empty:
                 continue
             if self.config["ROUTE_LOOKUP"]:
-                for plane in aircraft:
-                    if not self.stopping.is_set():
-                        self.cache.update_route(plane)
+                if not self.stopping.is_set():
+                    try:
+                        self.cache.routes.refresh_aircraft(aircraft)
+                    except (sqlite3.Error, OSError):
+                        LOG.warning("Route cache temporarily unavailable", exc_info=True)

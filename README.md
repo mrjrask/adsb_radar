@@ -184,3 +184,5 @@ See [NOTICE.md](NOTICE.md) for source provenance and font/data attribution.
 See [pimoroni_companion/README.md](pimoroni_companion/README.md) for the standalone
 installer/uninstaller for two PIM374 OLEDs and one PIM576 color LCD on Breakout
 Garden Mini. Adds flight instruments and an animated radar alongside HDMI.
+
+Flight origin/destination lookup, cache policy, coverage diagnostics, and known limitations: [Route enrichment](docs/ROUTE_ENRICHMENT.md).
