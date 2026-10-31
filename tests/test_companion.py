@@ -52,3 +52,33 @@ def test_shutdown_attempts_every_panel_even_if_one_fails():
     hardware.close()
     hardware.oleds[1].cleanup.assert_called_once()
     hardware.lcd.set_backlight.assert_called_once_with(0)
+
+
+def test_hidden_patterns_alternate_without_changing_visible_content():
+    first = render(snapshot(), 101)
+    second = render(snapshot(), 102)
+    for index, visible, hidden, margin in (
+        (0, (0, 0, 96, 128), (104, 0, 128, 128), (96, 0, 104, 128)),
+        (2, (32, 0, 128, 128), (0, 0, 24, 128), (24, 0, 32, 128)),
+    ):
+        assert first[index].crop(visible).tobytes() == second[index].crop(visible).tobytes()
+        assert first[index].crop(visible).getbbox()
+        assert first[index].crop(margin).getbbox() is None
+        before = first[index].crop(hidden).convert("L").tobytes()
+        after = second[index].crop(hidden).convert("L").tobytes()
+        assert all(bool(a) != bool(b) for a, b in zip(before, after, strict=True))
+        assert sum(bool(a) for a in before) == len(before) // 2
+
+
+def test_overlap_can_be_disabled_independently():
+    defaults = render(snapshot(), 101)
+    custom = render(snapshot(), 101, {"left_hidden_columns": 0})
+    assert defaults[0].tobytes() != custom[0].tobytes()
+    assert defaults[1].tobytes() == custom[1].tobytes()
+    assert defaults[2].tobytes() == custom[2].tobytes()
+
+
+@pytest.mark.parametrize("value", [-1, 49, True, 32.5, "32"])
+def test_invalid_overlap_is_rejected(value):
+    with pytest.raises(ValueError, match="left_hidden_columns"):
+        render(snapshot(), 101, {"left_hidden_columns": value})
